@@ -118,7 +118,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ---------------- CONFIG ---------------------
-GROQ_API_KEY = "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"
 client = Groq(api_key=GROQ_API_KEY)
 
 # ----------------- HISTORY LOGIC -----------------
