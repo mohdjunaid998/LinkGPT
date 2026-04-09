@@ -11,9 +11,7 @@ from supabase import create_client, Client # <--- BACKEND LIBRARY
 import os
 
 # Function ke andar path aise set karo
-save_path = os.path.join(os.getcwd(), "temp_audio")
-# outtmpl mein extension mat lagao, postprocessor khud lagayega
-"outtmpl": f"{save_path}.%(ext)s",
+
 
 # ----------------- 1. BACKEND CONNECT (YAHAN HOGA) -----------------
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
@@ -236,17 +234,20 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-       ydl_opts = {
+      # --- ISSE REPLACE KARO ---
+save_path = os.path.join(os.getcwd(), "temp_audio")
+
+ydl_opts = {
     "format": "bestaudio/best",
     "quiet": True,
     "no_warnings": True,
-    "outtmpl": "temp_audio.%(ext)s", # Simple path
+    # F-string ki jagah simple string use karo, yt-dlp % khud handle kar lega
+    "outtmpl": save_path + ".%(ext)s", 
     "postprocessors": [{
         "key": "FFmpegExtractAudio",
         "preferredcodec": "mp3",
         "preferredquality": "128",
     }],
-    # External downloader hata do agar error aa raha hai
     "noplaylist": True,
 }
 
