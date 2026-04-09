@@ -2,159 +2,246 @@ import streamlit as st
 import re
 import os
 import yt_dlp
+import base64
 from datetime import datetime
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client
 
-# ----------------- 1. INITIALIZATION & SECRETS -----------------
-st.set_page_config(page_title="LinkGPT — Video Intelligence", page_icon="🎬", layout="wide")
+# ----------------- 1. CONFIG & BACKEND -----------------
+st.set_page_config(page_title="LinkGPT — Video Intelligence Platform", page_icon="🎬", layout="wide")
 
-# Secrets Load
-try:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    
-    client = Groq(api_key=GROQ_API_KEY)
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    st.error("Secrets missing! Please check Streamlit Cloud Dashboard.")
-    st.stop()
+# Secrets Loading
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
-# Session State
-if "user" not in st.session_state:
-    st.session_state.user = None
+client = Groq(api_key=GROQ_API_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ----------------- 2. AUTHENTICATION LOGIC -----------------
+def google_login():
+    # Supabase Google Auth URL generate karega
+    res = supabase.auth.sign_in_with_oauth({
+        "provider": "google",
+        "options": {
+            "redirect_to": "https://linkgpt.streamlit.app" # Apna actual URL yahan dalo
+        }
+    })
+    # Isse user Google login page par redirect ho jayega
+    st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+
+# Session State for User
+if "user_data" not in st.session_state:
+    # Page load hone par check karo ki kya user oauth se wapas aaya hai
+    try:
+        curr_user = supabase.auth.get_user()
+        if curr_user:
+            st.session_state.user_data = {
+                "name": curr_user.user.user_metadata.get('full_name', 'User'),
+                "email": curr_user.user.email,
+                "dp_url": curr_user.user.user_metadata.get('avatar_url', 'https://api.dicebear.com/7.x/initials/svg?seed=User')
+            }
+        else:
+            st.session_state.user_data = None
+    except:
+        st.session_state.user_data = None
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# ----------------- 2. AUTHENTICATION LOGIC -----------------
-def login_user(email, password):
-    try:
-        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        st.session_state.user = res.user
-        st.success("Welcome back!")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Login Failed: {str(e)}")
+u = st.session_state.user_data if st.session_state.user_data else {}
 
-def signup_user(email, password):
-    try:
-        res = supabase.auth.sign_up({"email": email, "password": password})
-        st.info("Signup successful! Please check your email for confirmation (if enabled).")
-    except Exception as e:
-        st.error(f"Signup Failed: {str(e)}")
+# ----------------- 3. PREMIUM UI (ORIGINAL CSS) -----------------
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif !important;
+        color: #c9d1d9 !important;
+    }
 
-# ----------------- 3. CORE UTILS (WHISPER & TRANSCRIPT) -----------------
+    .main {
+        background: radial-gradient(circle at top right, #1e1e2f, #0e1117);
+    }
+
+    section[data-testid="stSidebar"] {
+        background-color: rgba(17, 25, 40, 0.75);
+        backdrop-filter: blur(12px);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .stButton>button {
+        background: linear-gradient(135deg, #FF4B4B 0%, #cc0000 100%);
+        color: white;
+        border-radius: 12px;
+        border: none;
+        padding: 0.6rem 2rem;
+        font-weight: 700;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(255, 75, 75, 0.3);
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(255, 75, 75, 0.5);
+    }
+
+    .stCard {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 1.5rem;
+        backdrop-filter: blur(10px);
+    }
+
+    div.stTextArea textarea, div.stTextInput input {
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        color: white !important;
+        border-radius: 12px !important;
+        padding: 15px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ----------------- 4. UTILS & TRANSCRIPTION -----------------
+def cleanup_temp_audio():
+    if os.path.exists("temp_audio.mp3"):
+        try: os.remove("temp_audio.mp3")
+        except: pass
+
 def extract_video_id(url: str) -> str:
-    patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})"]
+    patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})",
+                r"youtube\.com\/embed\/([0-9A-Za-z_-]{11})", r"youtube\.com\/shorts\/([0-9A-Za-z_-]{11})"]
     for p in patterns:
         match = re.search(p, url)
         if match: return match.group(1)
     return None
 
-def get_transcript(video_url):
-    video_id = extract_video_id(video_url)
-    if not video_id: return None, "Invalid URL"
-    
-    try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(['en', 'hi']).fetch()
-        return " ".join([t['text'] for t in transcript]), None
-    except:
-        return whisper_transcribe(video_url)
+def clean_youtube_url(url: str) -> str:
+    v_id = extract_video_id(url.strip().split()[0])
+    return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
 def whisper_transcribe(video_url):
     save_path = os.path.join(os.getcwd(), "temp_audio")
+    cleanup_temp_audio()
+    
     ydl_opts = {
         "format": "bestaudio/best",
+        "quiet": True,
         "outtmpl": save_path + ".%(ext)s",
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "128"}],
-        "quiet": True, "noplaylist": True,
+        "noplaylist": True,
     }
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
         
         audio_file = "temp_audio.mp3"
-        with open(audio_file, "rb") as f:
+        with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
-                file=(audio_file, f.read()),
+                file=(audio_file, file.read()),
                 model="whisper-large-v3-turbo",
                 response_format="text",
             )
-        os.remove(audio_file)
         return transcription, None
     except Exception as e:
-        return None, f"Deep Scan Error: {str(e)}"
+        return None, f"❌ Whisper Error: {str(e)}"
+    finally:
+        cleanup_temp_audio()
 
-# ----------------- 4. SIDEBAR & UI -----------------
-st.markdown("""
-    <style>
-    .stCard { background: rgba(255, 255, 255, 0.05); border-radius: 16px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.1); }
-    .chat-item { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 14px; }
-    </style>
-    """, unsafe_allow_html=True)
+def get_transcript(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id: return None, "❌ Invalid YouTube URL"
+    
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_transcript(['en', 'hi']).fetch()
+        clean_text = " ".join([t['text'] for t in transcript])
+        return clean_text, None
+    except:
+        return whisper_transcribe(video_url)
 
+# ----------------- 5. AI ENGINE -----------------
+def get_ai_response(transcript, user_query):
+    # (Same prompt logic as before - abbreviated for code block)
+    system_prompt = "You are LinkGPT Pro. Provide 10x intelligent insights. Use markdown structure."
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Transcript: {transcript[:18000]}\nQuery: {user_query}"}],
+            temperature=0.5, stream=True
+        )
+        return completion
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+# ----------------- 6. SIDEBAR (ORIGINAL LOOK) -----------------
 with st.sidebar:
-    if st.session_state.user:
-        st.write(f"Logged in as: **{st.session_state.user.email}**")
-        if st.button("Log Out"):
-            st.session_state.user = None
-            st.rerun()
+    if st.session_state.user_data:
+        col_dp, col_txt = st.columns([1, 3])
+        with col_dp:
+            st.markdown(f"""<img src="{u.get('dp_url')}" style="border-radius: 50%; width: 50px;">""", unsafe_allow_html=True)
+        with col_txt:
+            st.markdown(f"**{u.get('name')}**")
+            st.caption(u.get('email'))
         
-        st.markdown("---")
-        st.write("Recent Chats")
-        # Fetch from Supabase History
-        chats = supabase.table("video_chats").select("*").eq("user_email", st.session_state.user.email).order("created_at", desc=True).limit(5).execute()
-        for c in chats.data:
-            st.caption(f"📄 {c['query'][:30]}...")
+        st.button("✨ Upgrade", use_container_width=True)
+        
+        if st.button("Log Out", use_container_width=True):
+            supabase.auth.sign_out()
+            st.session_state.user_data = None
+            st.rerun()
     else:
-        st.title("LinkGPT Access")
-        tab1, tab2 = st.tabs(["Login", "Sign Up"])
-        with tab1:
-            e = st.text_input("Email", key="l_email")
-            p = st.text_input("Password", type="password", key="l_pass")
-            if st.button("Login"): login_user(e, p)
-        with tab2:
-            se = st.text_input("Email", key="s_email")
-            sp = st.text_input("Password", type="password", key="s_pass")
-            if st.button("Create Account"): signup_user(se, sp)
+        st.markdown('<div style="text-align:center;"><img src="https://api.dicebear.com/7.x/initials/svg?seed=Guest" style="width:80px; border-radius:50%; margin-bottom:10px;"></div>', unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align:center;'>Welcome</h3>", unsafe_allow_html=True)
+        
+        # --- NEW GOOGLE SIGNUP BUTTON ---
+        if st.button("🚀 Continue with Google", use_container_width=True, type="primary"):
+            google_login()
 
-# ----------------- 5. MAIN PAGE -----------------
+# ----------------- 7. MAIN UI -----------------
 st.title("LinkGPT — Video Intelligence")
+st.write("Extract insights from any YouTube video in seconds.")
 
-if not st.session_state.user:
-    st.warning("Please login from the sidebar to start analyzing videos.")
-    st.stop()
+st.markdown('<div class="stCard">', unsafe_allow_html=True)
+raw_input_url = st.text_input("🔗 Paste YouTube Video Link", placeholder="https://youtube.com/watch?v=...")
+video_url = clean_youtube_url(raw_input_url) if raw_input_url else ""
+st.markdown('</div>', unsafe_allow_html=True)
 
-raw_url = st.text_input("🔗 Paste YouTube Link")
-query = st.text_area("💬 What would you like to know?")
-
-if st.button("Analyze Video"):
-    if raw_url and query:
-        with st.spinner("Processing..."):
-            text, err = get_transcript(raw_url)
-            if err:
-                st.error(err)
-            else:
-                # Simple AI Call
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": f"Based on this: {text[:15000]}, answer: {query}"}]
-                )
-                ans = response.choices[0].message.content
-                st.markdown(ans)
-                
-                # Save to History
-                supabase.table("video_chats").insert({
-                    "user_email": st.session_state.user.email,
-                    "query": query,
-                    "response": ans,
-                    "video_url": raw_url
-                }).execute()
-                st.success("Analysis saved to history!")
-    else:
-        st.error("Bhai, dono fields fill karo!")
+if video_url:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    user_query = st.text_area("💬 What do you want to know?", placeholder="Summarize / Key Takeaways...", height=150)
+    
+    if st.button("🚀 Analyze Video Intel"):
+        if not st.session_state.user_data:
+            st.error("Please Sign in with Google to use LinkGPT.")
+        elif not user_query:
+            st.warning("Query toh likho, bhai!")
+        else:
+            with st.spinner("🧠 Brainstorming with AI..."):
+                transcript, error = get_transcript(video_url)
+                if error: st.error(error)
+                else:
+                    res_box = st.empty()
+                    full_res = ""
+                    for chunk in get_ai_response(transcript, user_query):
+                        if chunk.choices[0].delta.content:
+                            full_res += chunk.choices[0].delta.content
+                            res_box.markdown(full_res + "▌")
+                    res_box.markdown(full_res)
+                    
+                    # History Save in Supabase
+                    try:
+                        supabase.table("video_chats").insert({
+                            "user_email": u.get('email'),
+                            "query": user_query,
+                            "video_url": video_url
+                        }).execute()
+                    except: pass
+    st.markdown('</div>', unsafe_allow_html=True)
