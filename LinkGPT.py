@@ -10,9 +10,9 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 
 # ----------------- 1. BACKEND CONNECT (YAHAN HOGA) -----------------
-SUPABASE_URL = "https://ynsiywyqjfswflnhfemz.supabase.co"
-SUPABASE_KEY = "sb_publishable_IND0dCVgbPC7MJLicLQe9g_Rv-wJuWO"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 # ----------------- UI CONFIG (SABSE UPAR) -----------------
 st.set_page_config(page_title="LinkGPT — Video Intelligence Platform", page_icon="🎬", layout="wide")
