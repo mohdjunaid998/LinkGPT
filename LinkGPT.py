@@ -8,6 +8,12 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
+import os
+
+# Function ke andar path aise set karo
+save_path = os.path.join(os.getcwd(), "temp_audio")
+# outtmpl mein extension mat lagao, postprocessor khud lagayega
+"outtmpl": f"{save_path}.%(ext)s",
 
 # ----------------- 1. BACKEND CONNECT (YAHAN HOGA) -----------------
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
@@ -230,23 +236,19 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-        ydl_opts = {
-            "format": "wa/worst", # Sabse choti file uthao
-            "quiet": True,
-            "no_warnings": True,
-            "external_downloader": "ffmpeg",
-            "external_downloader_args": [
-                "-ss", "00:00:00", 
-                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
-                "-threads", "4"    # Multi-threading for 100x speed
-            ],
-            "outtmpl": "temp_audio.%(ext)s",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
-            }],
-        }
+       ydl_opts = {
+    "format": "bestaudio/best",
+    "quiet": True,
+    "no_warnings": True,
+    "outtmpl": "temp_audio.%(ext)s", # Simple path
+    "postprocessors": [{
+        "key": "FFmpegExtractAudio",
+        "preferredcodec": "mp3",
+        "preferredquality": "128",
+    }],
+    # External downloader hata do agar error aa raha hai
+    "noplaylist": True,
+}
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
