@@ -143,7 +143,7 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-ydl_opts = {
+        ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
