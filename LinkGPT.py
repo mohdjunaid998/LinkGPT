@@ -9,7 +9,8 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
-from dotenv import load_dotenv
+from dotenv import load_dotenv 
+import ffmpeg
 
 
 # --- UI CONFIG ---
