@@ -9,8 +9,8 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
-from dotenv import load_dotenv 
-import ffmpeg
+from auth_ui import inject_modal_style
+from dotenv import load_dotenv
 
 
 # --- UI CONFIG ---
@@ -32,6 +32,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- 1. SESSION STATE INITIALIZATION ---
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
+
+# --- 2. AUTH POPUP ---
+@st.dialog("Log in or sign up")
+def show_auth_modal():
+    st.markdown("<h2>Log in or sign up</h2>", unsafe_allow_html=True)
+    st.write("You'll get smarter responses and can save your history.")
+    
+    if st.button("Continue with Google", use_container_width=True, icon="🌐"):
+        st.session_state.user_data = {"email": "amit@example.com"}
+        st.rerun()
+
+    if st.button("Continue with Email", use_container_width=True, type="primary"):
+        st.session_state.user_data = {"email": "amit@email.com"}
+        st.rerun()
+
 
 
 # ----------------- HISTORY LOGIC -----------------
@@ -143,7 +158,7 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-      ydl_opts = {
+        ydl_opts = {
             "format": "wa/worst", # Sabse choti file uthao
             "quiet": True,
             "no_warnings": True,
@@ -367,4 +382,8 @@ else:
     st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
 
 
-       
+# Auto-show modal if not logged in
+if st.session_state.user_data is None:
+    show_auth_modal()
+        # running command
+    # python -m streamlit run LinkGPT.py    
