@@ -3,115 +3,78 @@ import re
 import os
 import yt_dlp
 import base64
+import streamlit.components.v1 as components
 from datetime import datetime
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
-from supabase import create_client, Client
+from supabase import create_client, Client # <--- BACKEND LIBRARY
+from auth_ui import inject_modal_style
+from dotenv import load_dotenv
 
-# ----------------- 1. CONFIG & BACKEND -----------------
-st.set_page_config(page_title="LinkGPT — Video Intelligence Platform", page_icon="🎬", layout="wide")
 
-# Secrets Loading
-GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+# --- UI CONFIG ---
+
+st.set_page_config(page_title="LinkGPT", layout="wide")
+
+
+# Load .env file
+load_dotenv()
+
+# Ab keys yahan se uthao
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ----------------- 2. AUTHENTICATION LOGIC -----------------
-def google_login():
-    # Supabase Google Auth URL generate karega
-    res = supabase.auth.sign_in_with_oauth({
-        "provider": "google",
-        "options": {
-            "redirect_to": "https://linkgpt.streamlit.app" # Apna actual URL yahan dalo
-        }
-    })
-    # Isse user Google login page par redirect ho jayega
-    st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-
-# Session State for User
+# --- 1. SESSION STATE INITIALIZATION ---
 if "user_data" not in st.session_state:
-    # Page load hone par check karo ki kya user oauth se wapas aaya hai
-    try:
-        curr_user = supabase.auth.get_user()
-        if curr_user:
-            st.session_state.user_data = {
-                "name": curr_user.user.user_metadata.get('full_name', 'User'),
-                "email": curr_user.user.email,
-                "dp_url": curr_user.user.user_metadata.get('avatar_url', 'https://api.dicebear.com/7.x/initials/svg?seed=User')
-            }
-        else:
-            st.session_state.user_data = None
-    except:
-        st.session_state.user_data = None
+    st.session_state.user_data = None 
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-u = st.session_state.user_data if st.session_state.user_data else {}
-
-# ----------------- 3. PREMIUM UI (ORIGINAL CSS) -----------------
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+# --- 2. AUTH POPUP ---
+@st.dialog("Log in or sign up")
+def show_auth_modal():
+    st.markdown("<h2>Log in or sign up</h2>", unsafe_allow_html=True)
+    st.write("You'll get smarter responses and can save your history.")
     
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif !important;
-        color: #c9d1d9 !important;
-    }
+    if st.button("Continue with Google", use_container_width=True, icon="🌐"):
+        st.session_state.user_data = {"email": "amit@example.com"}
+        st.rerun()
 
-    .main {
-        background: radial-gradient(circle at top right, #1e1e2f, #0e1117);
-    }
+    if st.button("Continue with Email", use_container_width=True, type="primary"):
+        st.session_state.user_data = {"email": "amit@email.com"}
+        st.rerun()
 
-    section[data-testid="stSidebar"] {
-        background-color: rgba(17, 25, 40, 0.75);
-        backdrop-filter: blur(12px);
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
-    }
 
-    .stButton>button {
-        background: linear-gradient(135deg, #FF4B4B 0%, #cc0000 100%);
-        color: white;
-        border-radius: 12px;
-        border: none;
-        padding: 0.6rem 2rem;
-        font-weight: 700;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(255, 75, 75, 0.3);
-    }
+
+# ----------------- HISTORY LOGIC -----------------
+def add_to_history(query, transcript):
+    """Recent chats mein prompt add karne ke liye"""
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
     
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(255, 75, 75, 0.5);
-    }
+    new_id = len(st.session_state.chat_history) + 1
+    timestamp = datetime.now().strftime("%I:%M %p")
+    
+    st.session_state.chat_history.append({
+        "id": new_id, 
+        "query": query, 
+        "time": timestamp
+    })
+    
+    # Sidebar clean rakhne ke liye sirf last 7 items rakhte hain
+    if len(st.session_state.chat_history) > 7:
+        st.session_state.chat_history.pop(0)
 
-    .stCard {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 1.5rem;
-        backdrop-filter: blur(10px);
-    }
-
-    div.stTextArea textarea, div.stTextInput input {
-        background-color: rgba(255, 255, 255, 0.02) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        color: white !important;
-        border-radius: 12px !important;
-        padding: 15px !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# ----------------- 4. UTILS & TRANSCRIPTION -----------------
+# ---------------- UTILS ---------------------
 def cleanup_temp_audio():
+    """Temporary audio file delete karne ke liye"""
     if os.path.exists("temp_audio.mp3"):
         try: os.remove("temp_audio.mp3")
         except: pass
+
 
 def extract_video_id(url: str) -> str:
     patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})",
@@ -125,123 +88,302 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
-def whisper_transcribe(video_url):
-    save_path = os.path.join(os.getcwd(), "temp_audio")
-    cleanup_temp_audio()
+#--------------------- Mannual & Force Transcribe (Updated) --------------------------------
+def get_transcript(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id: return None, "❌ Invalid YouTube URL"
     
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "quiet": True,
-        "outtmpl": save_path + ".%(ext)s",
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "128"}],
-        "noplaylist": True,
-    }
-
+    formatter = TextFormatter()
+    
     try:
+        # 1. Available Transcripts ki List mangwao
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # 2. LOGIC: Manual (EN/HI) -> Generated (EN/HI) -> Manual (Any) -> Translation
+        try:
+            # Sabse pehle Manual dhoondo (Best Quality)
+            transcript = transcript_list.find_manually_created_transcript(['en', 'hi'])
+            print("✅ Manual Transcript Found!")
+        except:
+            try:
+                # Agar Manual nahi, toh Auto-generated dhoondo
+                transcript = transcript_list.find_generated_transcript(['en', 'hi'])
+                print("ℹ️ Auto-Generated Found!")
+            except:
+                try:
+                    # AGGRESSIVE: Agar dono nahi mile, toh jo bhi pehli MANUAL hai use Translate karo
+                    # Example: Agar video Spanish mein hai par manual hai, toh use English mein badal do
+                    manual_keys = list(transcript_list._manually_created_transcripts.keys())
+                    if manual_keys:
+                        transcript = transcript_list.find_transcript([manual_keys[0]]).translate('en')
+                        print(f"🌍 Foreign Manual ({manual_keys[0]}) Translated to English!")
+                    else:
+                        # Last Option: Jo bhi pehla piece of text hai uthalo aur translate karo
+                        transcript = next(iter(transcript_list)).translate('en')
+                        print("⚠️ Forced Translation from first available source.")
+                except:
+                    raise Exception("No Captions Available")
+
+        # 3. Formatter se Clean Text nikal lo
+        raw_data = transcript.fetch()
+        full_text = formatter.format_transcript(raw_data)
+        
+        # AI ke liye single line string (Space optimize karne ke liye)
+        clean_text = full_text.replace('\n', ' ').strip()
+        
+        if not clean_text or len(clean_text) < 50:
+            raise Exception("Transcript is too short or empty")
+            
+        return clean_text, None
+
+    except Exception as e:
+        # STEP 4: WHISPER FALLBACK (The Last Weapon)
+        # Agar upar ka sab fail hota hai tabhi ye chalega
+        st.toast("Captions are strictly disabled. Initializing Deep AI Scan...", icon="🧠")
+        return whisper_transcribe(video_url)
+
+# --- 100x WHISPER OPTIMIZATION & CACHING ---
+def whisper_transcribe(video_url):
+    video_id = extract_video_id(video_url)
+    
+    # CHECK: Kya humne ye video abhi-abhi scan ki hai?
+    if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
+        if "last_transcript" in st.session_state:
+            print("🚀 Caching Hit! Using previous transcript.")
+            return st.session_state.last_transcript, None
+
+    # Agar nayi video hai, toh clean up purani file
+    cleanup_temp_audio()
+    audio_file = "temp_audio.mp3"
+    
+    try:
+        # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
+        ydl_opts = {
+            "format": "wa/worst", # Sabse choti file uthao
+            "quiet": True,
+            "no_warnings": True,
+            "external_downloader": "ffmpeg",
+            "external_downloader_args": [
+                "-ss", "00:00:00", 
+                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
+                "-threads", "4"    # Multi-threading for 100x speed
+            ],
+            "outtmpl": "temp_audio",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
+            }],
+        }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
-        
-        audio_file = "temp_audio.mp3"
+
+        # Whisper Large-v3-Turbo (Groq ka sabse tez model)
         with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file, file.read()),
-                model="whisper-large-v3-turbo",
+                model="whisper-large-v3-turbo", 
                 response_format="text",
             )
+        
+        # SAVE TO CACHE: Agli baar ke liye yaad rakho
+        st.session_state.last_video_id = video_id
+        st.session_state.last_transcript = transcription
+        
         return transcription, None
+
     except Exception as e:
         return None, f"❌ Whisper Error: {str(e)}"
     finally:
         cleanup_temp_audio()
 
-def get_transcript(video_url):
-    video_id = extract_video_id(video_url)
-    if not video_id: return None, "❌ Invalid YouTube URL"
-    
-    try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(['en', 'hi']).fetch()
-        clean_text = " ".join([t['text'] for t in transcript])
-        return clean_text, None
-    except:
-        return whisper_transcribe(video_url)
-
-# ----------------- 5. AI ENGINE -----------------
+# ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
-    # (Same prompt logic as before - abbreviated for code block)
-    system_prompt = "You are LinkGPT Pro. Provide 10x intelligent insights. Use markdown structure."
+    system_prompt = """
+    ROLE: You are LinkGPT Pro, a world-class YouTube Intelligence Assistant. Your goal is to provide 100x better insights than standard models.
+
+    CORE OPERATING PROTOCOLS:
+    1. INTENT FIRST: Analyze the user's query deeply. If they ask for a 'summary', don't give a 'breakdown'. Match the DEPTH and STYLE of the request perfectly.
+    2. LANGUAGE FLUIDITY:
+       - Detect Hindi/English/Hinglish automatically.
+       - If Hinglish: Use natural, conversational flow. Avoid robotic words (e.g., use 'Goal' instead of 'Lakshya', 'Step' instead of 'Charan').
+    3. NO EMOJIS: Strictly maintain a clean, premium, and professional text look.
+    4. NO FILLERS: Do NOT use phrases like "Based on the transcript" or "The video says". Start directly with the value.
+    5. SMART STRUCTURING: Use Markdown (### for headers). The structure must be dynamic. If the video is a tutorial, use 'Process-wise' headings. If it's a podcast, use 'Insight-wise' headings.
+
+    QUALITY BAR:
+    - Eliminate all repetitive or 'fluff' content from the transcript.
+    - If the user asks about a specific time/moment, focus 100% on that context with extreme detail.
+    - Simplify complex jargon using simple analogies.
+    - End with a high-value 'Final Insight' that summarizes the core 'Why' of the video.
+
+    🧠 1. Structural Rules (Non-Negotiable)
+Use clear, bold, intent-driven headers for every major section
+Break content into logically grouped sections
+Maintain a clean hierarchy:
+## → Main sections
+### → Subsections
+📌 2. Bullet Point Standards
+Prefer bullet points over long paragraphs
+Each bullet must be:
+Concise (≤ 2 lines)
+Focused on a single idea
+Start bullets with bold keywords when possible
+Avoid:
+❌ Paragraph-length bullets
+❌ Excessive nesting
+✂️ 3. Paragraph Constraints
+Maximum 2–3 lines per paragraph
+One paragraph = one clear idea
+Use line breaks generously to improve readability
+🎨 4. Visual Clarity Rules
+Use formatting intentionally:
+Bold → Key concepts
+Italics → Secondary emphasis
+Use emojis sparingly and purposefully (no clutter)
+Add separators (---) only when they improve structure
+⚡ 5. Readability Optimization
+Prioritize scan-first readability (user should grasp content in seconds)
+Avoid dense text blocks at all costs
+Ensure consistent spacing and alignment
+🔥 6. Content Flow Framework
+
+Always structure responses in this order:
+
+Top-Level Insight / Summary (if applicable)
+Structured Breakdown
+Key Takeaways / Actionable Points
+🏁 7. Quality Control Checklist
+
+Before finalizing, ensure:
+
+✅ No large text blocks
+✅ Headers clearly reflect intent
+✅ Content is easy to skim in <5 seconds
+✅ Every line adds value (no fluff)
+✅ Formatting is consistent throughout
+💡 Guiding Principle
+
+Optimize for clarity > completeness > cleverness
+
+⚠️ Failure Conditions (Must Avoid)
+Unstructured or wall-of-text responses
+Vague or generic headers
+Overuse of emojis or styling
+Redundant or filler content
+    """
+
+    user_content = f"""
+    [TRANSCRIPT DATA]
+    {transcript[:20000]}
+
+    [USER REQUEST]
+    {user_query}
+
+    INSTRUCTION: Deliver a premium, structured, and highly intelligent response following the CORE OPERATING PROTOCOLS.
+    """
+
     try:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Transcript: {transcript[:18000]}\nQuery: {user_query}"}],
-            temperature=0.5, stream=True
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            temperature=0.5, # Reduced for higher accuracy and professional tone
+            max_tokens=1800,
+            stream=True
         )
         return completion
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"❌ LinkGPT error please try after few minutes: {str(e)}"
 
-# ----------------- 6. SIDEBAR (ORIGINAL LOOK) -----------------
-with st.sidebar:
-    if st.session_state.user_data:
-        col_dp, col_txt = st.columns([1, 3])
-        with col_dp:
-            st.markdown(f"""<img src="{u.get('dp_url')}" style="border-radius: 50%; width: 50px;">""", unsafe_allow_html=True)
-        with col_txt:
-            st.markdown(f"**{u.get('name')}**")
-            st.caption(u.get('email'))
-        
-        st.button("✨ Upgrade", use_container_width=True)
-        
-        if st.button("Log Out", use_container_width=True):
-            supabase.auth.sign_out()
-            st.session_state.user_data = None
-            st.rerun()
-    else:
-        st.markdown('<div style="text-align:center;"><img src="https://api.dicebear.com/7.x/initials/svg?seed=Guest" style="width:80px; border-radius:50%; margin-bottom:10px;"></div>', unsafe_allow_html=True)
-        st.markdown("<h3 style='text-align:center;'>Welcome</h3>", unsafe_allow_html=True)
-        
-        # --- NEW GOOGLE SIGNUP BUTTON ---
-        if st.button("🚀 Continue with Google", use_container_width=True, type="primary"):
-            google_login()
 
-# ----------------- 7. MAIN UI -----------------
-st.title("LinkGPT — Video Intelligence")
-st.write("Extract insights from any YouTube video in seconds.")
+# ----------------- MAIN UI (CLEAN VERSION) -----------------
 
-st.markdown('<div class="stCard">', unsafe_allow_html=True)
-raw_input_url = st.text_input("🔗 Paste YouTube Video Link", placeholder="https://youtube.com/watch?v=...")
+
+
+st.markdown("""
+    <h1 class="main-title">
+        <span class="blue-text">LinkGPT</span> 
+        <span class="glass-text">— Video Intelligence</span>
+    </h1>
+""", unsafe_allow_html=True)
+
+st.write("Extract insights from any YouTube or Insta video in seconds.")
+st.markdown("---")
+
+# MAIN ACTION AREA
+raw_input_url = st.text_input("🔗 Paste YouTube Video Link", 
+                              placeholder="https://youtube.com/watch?v=...", 
+                              key="main_video_input")
+
 video_url = clean_youtube_url(raw_input_url) if raw_input_url else ""
-st.markdown('</div>', unsafe_allow_html=True)
 
 if video_url:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="stCard">', unsafe_allow_html=True)
-    user_query = st.text_area("💬 What do you want to know?", placeholder="Summarize / Key Takeaways...", height=150)
     
-    if st.button("🚀 Analyze Video Intel"):
-        if not st.session_state.user_data:
-            st.error("Please Sign in with Google to use LinkGPT.")
-        elif not user_query:
-            st.warning("Query toh likho, bhai!")
+    user_query = st.text_area("💬 Ask anything about the video?", 
+                              placeholder="Summarize this video / Give me key takeaways...", 
+                              height=150,
+                              key="main_query_input")
+    
+    # Analyze Button - CSS class "primary" ko target karega (Red Color)
+    if st.button("🚀 Analyze Video Intel", type="primary", key="main_analyze_btn"):
+        if not user_query:
+            st.warning("Bhai, write your query!")
         else:
-            with st.spinner("🧠 Brainstorming with AI..."):
+            with st.spinner("🧠 Analyzing video content..."):
                 transcript, error = get_transcript(video_url)
-                if error: st.error(error)
+                
+                if error:
+                    st.error(error)
                 else:
+                    st.markdown("---")
                     res_box = st.empty()
-                    full_res = ""
-                    for chunk in get_ai_response(transcript, user_query):
-                        if chunk.choices[0].delta.content:
-                            full_res += chunk.choices[0].delta.content
-                            res_box.markdown(full_res + "▌")
-                    res_box.markdown(full_res)
+                    full_response = ""
+                    # Tumhara AI Logic Call
+                    response_stream = get_ai_response(transcript, user_query)
                     
-                    # History Save in Supabase
-                    try:
-                        supabase.table("video_chats").insert({
-                            "user_email": u.get('email'),
-                            "query": user_query,
-                            "video_url": video_url
-                        }).execute()
-                    except: pass
-    st.markdown('</div>', unsafe_allow_html=True)
+                    if isinstance(response_stream, str):
+                        st.error(response_stream)
+                    else:
+                        for chunk in response_stream:
+                            if chunk.choices[0].delta.content:
+                                full_response += chunk.choices[0].delta.content
+                                res_box.markdown(full_response + "▌")
+                        res_box.markdown(full_response)
+                        
+                        # Save logic
+                        if st.session_state.user_data:
+                            add_to_history(user_query, transcript)
+                            try:
+                                supabase.table("video_chats").insert({
+                                    "user_email": st.session_state.user_data['email'],
+                                    "query": user_query,
+                                    "video_url": video_url
+                                }).execute()
+                                st.toast("Saved to your account!", icon="💾")
+                            except: pass
+                        else:
+                            st.toast("Guest Mode: Chat not saved.", icon="☁️")
+
+    # Guest Prompt styling fix
+    if not st.session_state.user_data:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+            <div style="background: #f1f5f9; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; color: #475569;">
+                <p style='margin-bottom:0px;'>Want to save this analysis? <b>Log in</b> to keep track of your video insights.</p>
+            </div>
+        """, unsafe_allow_html=True)
+     
+else:
+    st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
+
+
+# Auto-show modal if not logged in
+if st.session_state.user_data is None:
+    show_auth_modal()
+        # running command
+    # python -m streamlit run LinkGPT.py    
