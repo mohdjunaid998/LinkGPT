@@ -3,3 +3,6 @@ groq
 supabase
 yt-dlp
 youtube-transcript-api
+groq
+supabase
+python-dotenv
