@@ -129,40 +129,23 @@ def get_transcript(video_url):
 def whisper_transcribe(video_url):
     video_id = extract_video_id(video_url)
     
-    # CHECK: Kya humne ye video abhi-abhi scan ki hai?
-    if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
-        if "last_transcript" in st.session_state:
-            print("🚀 Caching Hit! Using previous transcript.")
-            return st.session_state.last_transcript, None
+    # Audio download ke liye minimal options
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "outtmpl": "temp_audio.%(ext)s", # Extension automatic lega
+    }
 
-    # Agar nayi video hai, toh clean up purani file
-    cleanup_temp_audio()
-    audio_file = "temp_audio.mp3"
-    
     try:
-        # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-        ydl_opts = {
-            "format": "wa/worst", # Sabse choti file uthao
-            "quiet": True,
-            "no_warnings": True,
-            "external_downloader": "ffmpeg",
-            "external_downloader_args": [
-                "-ss", "00:00:00", 
-                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
-                "-threads", "4"    # Multi-threading for 100x speed
-            ],
-            "outtmpl": "temp_audio",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
-            }],
-        }
-
+        cleanup_temp_audio()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+            info = ydl.extract_info(video_url, download=True)
+            # Kaunsi file bani, uska path lo
+            audio_file = f"temp_audio.{info['ext']}"
 
-        # Whisper Large-v3-Turbo (Groq ka sabse tez model)
+        # Whisper Large-v3-Turbo
         with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file, file.read()),
@@ -170,16 +153,13 @@ def whisper_transcribe(video_url):
                 response_format="text",
             )
         
-        # SAVE TO CACHE: Agli baar ke liye yaad rakho
-        st.session_state.last_video_id = video_id
-        st.session_state.last_transcript = transcription
-        
         return transcription, None
 
     except Exception as e:
         return None, f"❌ Whisper Error: {str(e)}"
     finally:
-        cleanup_temp_audio()
+        # cleanup_temp_audio() wala function check karna ki wo sahi file delete kar raha hai
+        pass
 
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
