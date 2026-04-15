@@ -7,3 +7,4 @@ youtube-transcript-api
 groq
 supabase
 python-dotenv
+yt-dlp>=2024.01.01
