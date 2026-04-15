@@ -366,6 +366,4 @@ else:
     st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
 
 
-# Auto-show modal if not logged in
-if st.session_state.user_data is None:
        
