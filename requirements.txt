@@ -1,6 +1,7 @@
 streamlit
 groq
 supabase
+ffmpeg
 yt-dlp
 youtube-transcript-api
 groq
