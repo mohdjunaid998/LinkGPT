@@ -143,17 +143,16 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-        ydl_opts = {
+       ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "outtmpl": "temp_audio",
-            "ffmpeg_location": "/usr/bin/ffmpeg",  # <--- YE LINE ADD KARO
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "24",
-            }],
+            # YouTube ko fake browser dikhao (Header Spoofing)
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "referer": "https://www.google.com/",
+            # Agar cookies ki zaroorat pade (optional)
+            "nocheckcertificate": True,
+            "outtmpl": "temp_audio.mp3",
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
