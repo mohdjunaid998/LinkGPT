@@ -368,6 +368,5 @@ else:
 
 # Auto-show modal if not logged in
 if st.session_state.user_data is None:
-    show_auth_modal()
         # running command
     # python -m streamlit run LinkGPT.py    
