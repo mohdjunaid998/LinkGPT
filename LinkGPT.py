@@ -143,21 +143,16 @@ def whisper_transcribe(video_url):
     
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-        ydl_opts = {
-            "format": "wa/worst", # Sabse choti file uthao
+ydl_opts = {
+            "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "external_downloader": "ffmpeg",
-            "external_downloader_args": [
-                "-ss", "00:00:00", 
-                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
-                "-threads", "4"    # Multi-threading for 100x speed
-            ],
             "outtmpl": "temp_audio",
+            "ffmpeg_location": "/usr/bin/ffmpeg",  # <--- YE LINE ADD KARO
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
+                "preferredquality": "24",
             }],
         }
 
