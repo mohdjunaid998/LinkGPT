@@ -154,7 +154,6 @@ def whisper_transcribe(video_url):
             "nocheckcertificate": True,
             "outtmpl": "temp_audio.mp3",
         }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
