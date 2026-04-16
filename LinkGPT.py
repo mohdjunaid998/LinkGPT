@@ -128,6 +128,7 @@ def get_transcript(video_url):
 # --- 100x WHISPER OPTIMIZATION & CACHING ---
 def whisper_transcribe(video_url):
     video_id = extract_video_id(video_url)
+    cookie_path = "cookies.txt"
     
     # Audio download ke liye minimal options
     ydl_opts = {
