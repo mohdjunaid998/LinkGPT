@@ -32,22 +32,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
 
-# --- 2. AUTH POPUP ---
-@st.dialog("Log in or sign up")
-def show_auth_modal():
-    st.markdown("<h2>Log in or sign up</h2>", unsafe_allow_html=True)
-    st.write("You'll get smarter responses and can save your history.")
-    
-    if st.button("Continue with Google", use_container_width=True, icon="🌐"):
-        st.session_state.user_data = {"email": "amit@example.com"}
-        st.rerun()
-
-    if st.button("Continue with Email", use_container_width=True, type="primary"):
-        st.session_state.user_data = {"email": "amit@email.com"}
-        st.rerun()
-
-
-
 # ----------------- HISTORY LOGIC -----------------
 def add_to_history(query, transcript):
     """Recent chats mein prompt add karne ke liye"""
@@ -380,8 +364,3 @@ else:
     st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
 
 
-# Auto-show modal if not logged in
-if st.session_state.user_data is None:
-    show_auth_modal()
-        # running command
-    # python -m streamlit run LinkGPT.py    
