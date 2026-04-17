@@ -160,6 +160,8 @@ def whisper_transcribe(video_url):
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
         ydl_opts = {
             "format": "wa/worst", # Sabse choti file uthao
+            "cookiefile": "cookies.txt", # Ab ye dynamic file use karega
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             "quiet": True,
             "no_warnings": True,
             "external_downloader": "ffmpeg",
