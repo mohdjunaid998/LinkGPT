@@ -15,7 +15,18 @@ from dotenv import load_dotenv
 # --- UI CONFIG ---
 
 st.set_page_config(page_title="LinkGPT", layout="wide")
+import os
+# ... baaki imports
 
+# Line 28 ke paas ye karo:
+api_key = os.getenv("GROQ_API_KEY") 
+
+# Agar abhi bhi error aaye, toh check karo ki variable mil raha hai ya nahi:
+if not api_key:
+    st.error("GROQ_API_KEY nahi mil rahi! Variables tab check karo.")
+    st.stop()
+
+client = Groq(api_key=api_key)
 
 # Load .env file
 load_dotenv()
