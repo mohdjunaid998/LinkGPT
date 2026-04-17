@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Railway variable se cookies banao
 cookies_b64 = os.getenv("COOKIES_CONTENT")
 if cookies_b64:
-    with open("cookies.txt", "wb") as f:
+    with open("youtube_cookies.txt", "wb") as f:
         f.write(base64.b64decode(cookies_b64))
     print("Cookies file successfully created!")
 else:
@@ -160,7 +160,7 @@ def whisper_transcribe(video_url):
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
         ydl_opts = {
     "format": "bestaudio/best", # "wa/worst" shayad hi koi format ho, bestaudio safest hai
-    "cookiefile": "cookies.txt",
+    "cookiefile": "youtube_cookies.txt",
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "quiet": True, # <--- Tumne yahan comma miss kar diya tha
     "no_warnings": True,
