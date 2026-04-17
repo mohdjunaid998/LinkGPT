@@ -162,6 +162,7 @@ def whisper_transcribe(video_url):
     "format": "bestaudio/best",
     "cookiefile": "youtube_cookies.txt", # Ab ye dynamic file use karega
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "nocheckcertificate": True,
     "quiet": True,
     "no_warnings": True,
     "external_downloader": "ffmpeg",
