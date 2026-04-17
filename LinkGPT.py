@@ -12,7 +12,7 @@ from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 
 # Railway variable se cookies banao
-cookies_b64 = os.getenv("COOKIES_DATA")
+cookies_b64 = os.getenv("COOKIES_CONTENT")
 if cookies_b64:
     with open("youtube_cookies.txt", "wb") as f:
         f.write(base64.b64decode(cookies_b64))
