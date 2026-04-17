@@ -155,7 +155,6 @@ def whisper_transcribe(video_url):
     # Agar nayi video hai, toh clean up purani file
     cleanup_temp_audio()
     audio_file = "temp_audio.mp3"
-    
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
         ydl_opts = {
