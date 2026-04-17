@@ -9,6 +9,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
+from auth_ui import inject_modal_style
 from dotenv import load_dotenv
 
 
@@ -31,6 +32,22 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- 1. SESSION STATE INITIALIZATION ---
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
+
+# --- 2. AUTH POPUP ---
+@st.dialog("Log in or sign up")
+def show_auth_modal():
+    st.markdown("<h2>Log in or sign up</h2>", unsafe_allow_html=True)
+    st.write("You'll get smarter responses and can save your history.")
+    
+    if st.button("Continue with Google", use_container_width=True, icon="🌐"):
+        st.session_state.user_data = {"email": "amit@example.com"}
+        st.rerun()
+
+    if st.button("Continue with Email", use_container_width=True, type="primary"):
+        st.session_state.user_data = {"email": "amit@email.com"}
+        st.rerun()
+
+
 
 # ----------------- HISTORY LOGIC -----------------
 def add_to_history(query, transcript):
@@ -128,25 +145,41 @@ def get_transcript(video_url):
 # --- 100x WHISPER OPTIMIZATION & CACHING ---
 def whisper_transcribe(video_url):
     video_id = extract_video_id(video_url)
-    cookie_path = "cookies.txt"
     
-    # Audio download ke liye minimal options
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "quiet": True,
-        "no_warnings": True,
-        "nocheckcertificate": True,
-        "outtmpl": "temp_audio.%(ext)s", # Extension automatic lega
-    }
+    # CHECK: Kya humne ye video abhi-abhi scan ki hai?
+    if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
+        if "last_transcript" in st.session_state:
+            print("🚀 Caching Hit! Using previous transcript.")
+            return st.session_state.last_transcript, None
 
+    # Agar nayi video hai, toh clean up purani file
+    cleanup_temp_audio()
+    audio_file = "temp_audio.mp3"
+    
     try:
-        cleanup_temp_audio()
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
-            # Kaunsi file bani, uska path lo
-            audio_file = f"temp_audio.{info['ext']}"
+        # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
+        ydl_opts = {
+            "format": "wa/worst", # Sabse choti file uthao
+            "quiet": True,
+            "no_warnings": True,
+            "external_downloader": "ffmpeg",
+            "external_downloader_args": [
+                "-ss", "00:00:00", 
+                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
+                "-threads", "4"    # Multi-threading for 100x speed
+            ],
+            "outtmpl": "temp_audio",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
+            }],
+        }
 
-        # Whisper Large-v3-Turbo
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+
+        # Whisper Large-v3-Turbo (Groq ka sabse tez model)
         with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file, file.read()),
@@ -154,13 +187,16 @@ def whisper_transcribe(video_url):
                 response_format="text",
             )
         
+        # SAVE TO CACHE: Agli baar ke liye yaad rakho
+        st.session_state.last_video_id = video_id
+        st.session_state.last_transcript = transcription
+        
         return transcription, None
 
     except Exception as e:
         return None, f"❌ Whisper Error: {str(e)}"
     finally:
-        # cleanup_temp_audio() wala function check karna ki wo sahi file delete kar raha hai
-        pass
+        cleanup_temp_audio()
 
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
@@ -345,3 +381,9 @@ if video_url:
 else:
     st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
 
+
+# Auto-show modal if not logged in
+if st.session_state.user_data is None:
+    show_auth_modal()
+        # running command
+    # python -m streamlit run LinkGPT.py    
