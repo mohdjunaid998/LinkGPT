@@ -159,24 +159,24 @@ def whisper_transcribe(video_url):
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
         ydl_opts = {
-            "format": "wa/worst", # Sabse choti file uthao
-            "cookiefile": "cookies.txt", # Ab ye dynamic file use karega
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            "quiet": True,
-            "no_warnings": True,
-            "external_downloader": "ffmpeg",
-            "external_downloader_args": [
-                "-ss", "00:00:00", 
-                "-to", "00:08:00", # Sirf 8 minute tak ka context (Speed ke liye)
-                "-threads", "4"    # Multi-threading for 100x speed
-            ],
-            "outtmpl": "temp_audio",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "24", # Ekdum low quality (Whisper ke liye kaafi hai)
-            }],
-        }
+    "format": "bestaudio/best", # "wa/worst" shayad hi koi format ho, bestaudio safest hai
+    "cookiefile": "cookies.txt",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "quiet": True, # <--- Tumne yahan comma miss kar diya tha
+    "no_warnings": True,
+    "external_downloader": "ffmpeg",
+    "external_downloader_args": [
+        "-ss", "00:00:00", 
+        "-to", "00:08:00",
+        "-threads", "4"
+    ],
+    "outtmpl": "temp_audio",
+    "postprocessors": [{
+        "key": "FFmpegExtractAudio",
+        "preferredcodec": "mp3",
+        "preferredquality": "24",
+    }],
+}
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
