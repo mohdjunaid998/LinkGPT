@@ -11,7 +11,14 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 
-
+# Railway variable se cookies banao
+cookies_b64 = os.getenv("COOKIES_CONTENT")
+if cookies_b64:
+    with open("cookies.txt", "wb") as f:
+        f.write(base64.b64decode(cookies_b64))
+    print("Cookies file successfully created!")
+else:
+    print("Warning: COOKIES_CONTENT not found in variables!")
 # --- UI CONFIG ---
 
 st.set_page_config(page_title="LinkGPT", layout="wide")
