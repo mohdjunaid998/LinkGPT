@@ -159,10 +159,10 @@ def whisper_transcribe(video_url):
     try:
         # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
         ydl_opts = {
-    "format": "bestaudio/best", # "wa/worst" shayad hi koi format ho, bestaudio safest hai
-    "cookiefile": "youtube_cookies.txt",
+    "format": "bestaudio/best",
+    "cookiefile": "youtube_cookies.txt", # Ab ye dynamic file use karega
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "quiet": True, # <--- Tumne yahan comma miss kar diya tha
+    "quiet": True,
     "no_warnings": True,
     "external_downloader": "ffmpeg",
     "external_downloader_args": [
@@ -174,7 +174,7 @@ def whisper_transcribe(video_url):
     "postprocessors": [{
         "key": "FFmpegExtractAudio",
         "preferredcodec": "mp3",
-        "preferredquality": "24",
+        "preferredquality": "96", # 96 quality audio transcription ke liye better hai
     }],
 }
 
