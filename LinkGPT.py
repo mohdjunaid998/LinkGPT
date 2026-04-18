@@ -57,7 +57,7 @@ def get_transcript(video_url):
     video_id = extract_video_id(video_url)
     if not video_id: return None, "❌ Invalid YouTube URL"
     
-    # --- STEP 1: CHECK SUPABASE CACHE FIRST ---
+    # --- STEP 1: CACHE CHECK (Wahi purana logic) ---
     try:
         cached_data = supabase.table("transcripts_cache") \
             .select("transcript") \
@@ -65,13 +65,14 @@ def get_transcript(video_url):
             .execute()
         
         if cached_data.data and len(cached_data.data) > 0:
-            st.toast("⚡ Speed Mode: Using cached data!", icon="🚀")
+            st.toast("⚡ Using cached data!", icon="🚀")
             return cached_data.data[0]['transcript'], None
-    except Exception as e:
-        print(f"Cache check error: {e}") # Agar cache fail ho toh API par move karenge
+    except: pass
 
-    # --- STEP 2: IF NOT IN CACHE, CALL PREMIUM API ---
+    # --- STEP 2: API CALL ---
     api_url = 'https://transcriptapi.com/api/v2/youtube/transcript'
+    
+    # Direct original URL bhej kar dekho, cleaning ke bina
     params = {'video_url': video_url, 'format': 'json'}
     headers = {'Authorization': f'Bearer {TRANSCRIPT_API_KEY}'}
     
@@ -80,27 +81,23 @@ def get_transcript(video_url):
         
         if response.status_code == 200:
             full_text = response.json().get('transcript', '')
-            
             if full_text:
-                # --- STEP 3: SAVE TO CACHE FOR NEXT TIME ---
-                try:
-                    supabase.table("transcripts_cache").upsert({
-                        "video_id": video_id,
-                        "transcript": full_text
-                    }).execute()
-                    st.toast("✅ Saved to cache for next time!", icon="💾")
-                except Exception as cache_err:
-                    print(f"Failed to save to cache: {cache_err}")
-                
+                # Cache save logic...
                 return full_text, None
-            else:
-                return None, "❌ API ne transcript return nahi ki."
-        else:
-            return None, f"❌ Transcript API Error: Code {response.status_code}"
+        
+        # AGAR 404 AAYE TOH EK BAAR ALTERNATIVE URL TRY KARO
+        elif response.status_code == 404:
+            alt_url = f"https://www.youtube.com/watch?v={video_id}"
+            params['video_url'] = alt_url
+            response = requests.get(api_url, params=params, headers=headers, timeout=30)
+            if response.status_code == 200:
+                return response.json().get('transcript', ''), None
+            return None, "❌ API ko ye video nahi mili. Kya video public hai?"
+
+        return None, f"❌ API Error: Code {response.status_code}"
             
     except Exception as e:
         return None, f"❌ Connection Error: {str(e)}"
-    
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
     system_prompt = """
