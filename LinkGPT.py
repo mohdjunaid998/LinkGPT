@@ -45,46 +45,67 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
-# Mannual Transcript-----------
-def get_transcript(video_url):
-    video_id = extract_video_id(video_url)
-    
-    # --- Priority 1: Official Transcript API ---
-    try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi'])
-        full_text = " ".join([t['text'] for t in transcript_list])
-        return full_text, None
-    except Exception as e:
-        print(f"Official API failed, trying Piped... {e}")
-
-    # --- Priority 2: Piped API (Third Party Bypass) ---
-    text, error = get_piped_transcript(video_id)
-    if text:
-        # Piped ka text clean karna (VTT format hatana)
-        clean_text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3}.*?\n', '', text) # Time stamps hatane ke liye
-        return clean_text, None
-    
-    return None, "❌ Sorry Bhai! Is video ke captions disable hain aur hum audio download nahi kar rahe."
-
-# 2nd method for Transcript------
+# 2nd method for Transcript (Piped API) ------
 def get_piped_transcript(video_id):
-    # Multiple instances use karein taaki agar ek down ho toh dusra chale
-    instances = ["https://pipedapi.kavin.rocks", "https://api.piped.victr.me"]
+    # Multiple reliable instances
+    instances = [
+        "https://pipedapi.kavin.rocks", 
+        "https://api.piped.victr.me",
+        "https://pipedapi.recloud.me"
+    ]
     
     for base_url in instances:
-        api_url = f"{base_url}/streams/{video_id}"
         try:
+            api_url = f"{base_url}/streams/{video_id}"
             response = requests.get(api_url, timeout=10)
             data = response.json()
             
             if 'subtitles' in data and len(data['subtitles']) > 0:
-                # English ya Auto-generated dhoondo
-                subtitle_url = data['subtitles'][0]['url']
-                sub_res = requests.get(subtitle_url)
-                return sub_res.text, None
+                # English ya pehla available subtitle uthao
+                sub_url = data['subtitles'][0]['url']
+                sub_res = requests.get(sub_url, timeout=10)
+                raw_text = sub_res.text
+                
+                # Cleanup: Timestamps aur HTML tags hatana
+                clean_text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3} --> \d{2}:\d{2}:\d{2}.\d{3}', '', raw_text)
+                clean_text = re.sub(r'<[^>]*>', '', clean_text) # HTML tags
+                clean_text = re.sub(r'\{\\.*\}', '', clean_text) # VTT styling
+                return " ".join(clean_text.split()), None
         except:
             continue
-    return None, "Piped instances are busy or no captions."
+    return None, "All backup servers failed."
+
+# Main Transcript Logic -----------
+def get_transcript(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id: return None, "Invalid URL"
+    
+    # --- Priority 1: Official Transcript API (Smart Mode) ---
+    try:
+        # Saari available languages ki list check karo
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # Priority: Manual English -> Manual Hindi -> Generated English -> Generated Hindi
+        try:
+            transcript = transcript_list.find_transcript(['en', 'hi', 'en-US', 'en-GB', 'hi-IN'])
+        except:
+            # Agar koi specific nahi milti toh jo pehli milti hai wahi lelo
+            transcript = transcript_list.find_generated_transcript(['en', 'hi']) or next(iter(transcript_list))
+            
+        data = transcript.fetch()
+        full_text = " ".join([t['text'] for t in data])
+        return full_text, None
+        
+    except Exception as e:
+        print(f"Official API failed: {e}")
+
+    # --- Priority 2: Piped API (Bypass Method) ---
+    with st.spinner("Checking global backup servers..."):
+        text, error = get_piped_transcript(video_id)
+        if text:
+            return text, None
+    
+    return None, "❌ Sorry Bhai! Is video ke captions disable hain. Bina captions ke analysis abhi possible nahi hai."
 
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
@@ -202,27 +223,17 @@ st.markdown("""
 st.write("Extract insights from any YouTube or Insta video in seconds.")
 st.markdown("---")
 
-# MAIN ACTION AREA
-raw_input_url = st.text_input("🔗 Paste YouTube Video Link", 
-                              placeholder="https://youtube.com/watch?v=...", 
-                              key="main_video_input")
-
+raw_input_url = st.text_input("🔗 Paste YouTube Video Link", placeholder="https://youtube.com/watch?v=...")
 video_url = clean_youtube_url(raw_input_url) if raw_input_url else ""
 
 if video_url:
-    st.markdown("<br>", unsafe_allow_html=True)
+    user_query = st.text_area("💬 Ask anything about the video?", height=120)
     
-    user_query = st.text_area("💬 Ask anything about the video?", 
-                              placeholder="Summarize this video / Give me key takeaways...", 
-                              height=150,
-                              key="main_query_input")
-    
-    # Analyze Button - CSS class "primary" ko target karega (Red Color)
-    if st.button("🚀 Analyze Video Intel", type="primary", key="main_analyze_btn"):
+    if st.button("🚀 Analyze Video Intel", type="primary"):
         if not user_query:
-            st.warning("Bhai, write your query!")
+            st.warning("Query likho bhai!")
         else:
-            with st.spinner("🧠 Analyzing video content..."):
+            with st.spinner("🧠 Extracting intelligence..."):
                 transcript, error = get_transcript(video_url)
                 
                 if error:
@@ -231,7 +242,6 @@ if video_url:
                     st.markdown("---")
                     res_box = st.empty()
                     full_response = ""
-                    # Tumhara AI Logic Call
                     response_stream = get_ai_response(transcript, user_query)
                     
                     if isinstance(response_stream, str):
@@ -243,30 +253,16 @@ if video_url:
                                 res_box.markdown(full_response + "▌")
                         res_box.markdown(full_response)
                         
-                        # Save logic
+                        # Database Save Logic
                         if st.session_state.user_data:
-                            add_to_history(user_query, transcript)
                             try:
                                 supabase.table("video_chats").insert({
                                     "user_email": st.session_state.user_data['email'],
                                     "query": user_query,
                                     "video_url": video_url
                                 }).execute()
-                                st.toast("Saved to your account!", icon="💾")
                             except: pass
-                        else:
-                            st.toast("Guest Mode: Chat not saved.", icon="☁️")
-
-    # Guest Prompt styling fix
-    if not st.session_state.user_data:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("""
-            <div style="background: #f1f5f9; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; color: #475569;">
-                <p style='margin-bottom:0px;'>Want to save this analysis? <b>Log in</b> to keep track of your video insights.</p>
-            </div>
-        """, unsafe_allow_html=True)
-     
 else:
-    st.info("👆 Paste a YouTube link to unlock Video Intelligence magic.")
+    st.info("👆 YouTube link dalo aur magic dekho.")
 
 
