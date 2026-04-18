@@ -157,28 +157,30 @@ def whisper_transcribe(video_url):
     cleanup_temp_audio()
     audio_file = "temp_audio.mp3"
     try:
-        # 100x SPEED SETTINGS: Ultra Low Quality + Turbo Download
-        ydl_opts = {
-    "format": "bestaudio/best",
-    "cookiefile": "youtube_cookies.txt", # Ab ye dynamic file use karega
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "nocheckcertificate": True,
-    "quiet": True,
-    "no_warnings": True,
-    "external_downloader": "ffmpeg",
-    "external_downloader_args": [
-        "-ss", "00:00:00", 
-        "-to", "00:08:00",
-        "-threads", "4"
-    ],
-    "outtmpl": "temp_audio",
-    "postprocessors": [{
-        "key": "FFmpegExtractAudio",
-        "preferredcodec": "mp3",
-        "preferredquality": "96", # 96 quality audio transcription ke liye better hai
-    }],
-}
-
+       # Cookies fetch karo variable se
+     raw_cookies = os.getenv("COOKIES_DATA")
+     ydl_opts = {
+        "format": "bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+        # YE HAI MAGIC LINE: Bina file ke cookies pass karna
+        "http_headers": {
+            "Cookie": raw_cookies
+        },
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "external_downloader": "ffmpeg",
+        "external_downloader_args": [
+            "-ss", "00:00:00", 
+            "-to", "00:08:00",
+            "-threads", "4"
+        ],
+        "outtmpl": "temp_audio",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "96",
+        }],
+    }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
