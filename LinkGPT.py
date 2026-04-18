@@ -15,7 +15,7 @@ import shutil
 cookies_data_from_env = os.getenv("COOKIES_DATA") 
 
 # Step 2: Volume folder path
-volume_path = "/app/cookies/cookies.txt"
+volume_path = "/cookies.txt"
 
 if cookies_raw and not os.path.exists(volume_path):
     with open(volume_path, "w") as f:
