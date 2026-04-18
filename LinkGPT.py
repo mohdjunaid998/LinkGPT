@@ -47,65 +47,69 @@ def clean_youtube_url(url: str) -> str:
 
 # 2nd method for Transcript (Piped API) ------
 def get_piped_transcript(video_id):
-    # Multiple reliable instances
+    # Naye active Piped instances
     instances = [
         "https://pipedapi.kavin.rocks", 
-        "https://api.piped.victr.me",
-        "https://pipedapi.recloud.me"
+        "https://api.piped.projectsegfau.lt",
+        "https://pipedapi.lunar.icu"
     ]
     
     for base_url in instances:
         try:
+            # Step 1: Video streams data fetch karo
             api_url = f"{base_url}/streams/{video_id}"
             response = requests.get(api_url, timeout=10)
-            data = response.json()
+            if response.status_code != 200: continue
             
+            data = response.json()
+            # Step 2: Subtitles check karo
             if 'subtitles' in data and len(data['subtitles']) > 0:
-                # English ya pehla available subtitle uthao
+                # Sabse pehla subtitle uthao (aksar English hota hai)
                 sub_url = data['subtitles'][0]['url']
                 sub_res = requests.get(sub_url, timeout=10)
-                raw_text = sub_res.text
                 
-                # Cleanup: Timestamps aur HTML tags hatana
-                clean_text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3} --> \d{2}:\d{2}:\d{2}.\d{3}', '', raw_text)
-                clean_text = re.sub(r'<[^>]*>', '', clean_text) # HTML tags
-                clean_text = re.sub(r'\{\\.*\}', '', clean_text) # VTT styling
-                return " ".join(clean_text.split()), None
-        except:
+                # Cleanup logic for VTT/SRT
+                text = sub_res.text
+                text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3} --> \d{2}:\d{2}:\d{2}.\d{3}', '', text) # Timestamps
+                text = re.sub(r'<[^>]*>', '', text) # HTML tags
+                text = " ".join(text.split())
+                return text, None
+        except Exception as e:
+            print(f"Piped instance {base_url} failed: {e}")
             continue
-    return None, "All backup servers failed."
+    return None, "All bypass servers are currently busy."
 
-# Main Transcript Logic -----------
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
-    if not video_id: return None, "Invalid URL"
+    if not video_id: return None, "❌ Invalid YouTube URL"
     
-    # --- Priority 1: Official Transcript API (Smart Mode) ---
+    # --- Priority 1: Official API (With Deep Check) ---
     try:
-        # Saari available languages ki list check karo
+        # Saari transcripts ki list mangwao
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         
-        # Priority: Manual English -> Manual Hindi -> Generated English -> Generated Hindi
+        # Koshish karo inme se koi mil jaye
         try:
+            # Manual ya Generated dono mein se jo best ho
             transcript = transcript_list.find_transcript(['en', 'hi', 'en-US', 'en-GB', 'hi-IN'])
         except:
-            # Agar koi specific nahi milti toh jo pehli milti hai wahi lelo
-            transcript = transcript_list.find_generated_transcript(['en', 'hi']) or next(iter(transcript_list))
+            # Agar upar waali na milti ho, toh jo pehli available hai wahi uthalo (Automatic fallback)
+            transcript = next(iter(transcript_list))
             
         data = transcript.fetch()
         full_text = " ".join([t['text'] for t in data])
-        return full_text, None
-        
+        if len(full_text.strip()) > 10:
+            return full_text, None
     except Exception as e:
-        print(f"Official API failed: {e}")
+        print(f"Official API Blocked/Failed: {e}")
 
-    # --- Priority 2: Piped API (Bypass Method) ---
-    with st.spinner("Checking global backup servers..."):
+    # --- Priority 2: Piped API (The Bypass) ---
+    with st.spinner("YouTube direct block kar raha hai... Alternative raste se nikal raha hoon..."):
         text, error = get_piped_transcript(video_id)
         if text:
             return text, None
     
-    return None, "❌ Sorry Bhai! Is video ke captions disable hain. Bina captions ke analysis abhi possible nahi hai."
+    return None, "❌ Sorry Bhai! Is video ke captions extract nahi ho paa rahe. Shayad YouTube ne is server ko puri tarah block kar diya hai."
 
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
