@@ -11,40 +11,46 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 import shutil
-# Step 1: Check karo variable hai ya nahi
-cookies_data_from_env = os.getenv("COOKIES_DATA") 
-
-# Step 2: Volume folder path
-volume_path = "/cookies.txt"
-
-if cookies_raw and not os.path.exists(volume_path):
-    with open(volume_path, "w") as f:
-        f.write(cookies_raw)
-    print("✅ File permanently moved to Volume!")
-
-# 1. LOAD CONFIG FIRST
+# --- 1. LOAD CONFIG & VARIABLES ---
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-COOKIES_CONTENT = os.getenv("COOKIES_CONTENT")
-RAW_COOKIES = os.getenv("COOKIES_DATA") # For HTTP Headers method
 
-# 2. INITIALIZE CLIENTS
+# Cookies ke liye hum ek hi variable use karenge: COOKIES_DATA
+COOKIES_DATA = os.getenv("COOKIES_DATA") 
+
+# --- 2. VOLUME & COOKIE SETUP ---
+# Volume ka path (Railway Mount Path ke hisaab se)
+volume_path = "/app/cookies/cookies.txt" 
+
+if COOKIES_DATA:
+    try:
+        # Volume folder ensure karo
+        os.makedirs("/app/cookies", exist_ok=True)
+        
+        # Agar file pehle se nahi hai, toh hi write karo (Efficiency)
+        if not os.path.exists(volume_path):
+            with open(volume_path, "w", encoding="utf-8") as f:
+                f.write(COOKIES_DATA)
+            print("✅ Cookies successfully saved to Volume!")
+            
+        # Safety ke liye ek copy local folder mein bhi rakh lo
+        with open("youtube_cookies.txt", "w", encoding="utf-8") as f:
+            f.write(COOKIES_DATA)
+            
+    except Exception as e:
+        print(f"❌ Cookie/Volume Setup Error: {e}")
+else:
+    print("⚠️ Warning: COOKIES_DATA variable not found in Railway!")
+
+# --- 3. INITIALIZE CLIENTS ---
 if not GROQ_API_KEY:
     st.error("GROQ_API_KEY missing! Check Railway Variables.")
     st.stop()
 
 client = Groq(api_key=GROQ_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# 3. COOKIES SETUP (Binary File Method)
-if COOKIES_CONTENT:
-    try:
-        with open("youtube_cookies.txt", "wb") as f:
-            f.write(base64.b64decode(COOKIES_CONTENT))
-    except Exception as e:
-        print(f"Cookie creation failed: {e}")
 
 # --- UI CONFIG ---
 st.set_page_config(page_title="LinkGPT", layout="wide")
