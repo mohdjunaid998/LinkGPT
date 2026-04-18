@@ -10,13 +10,19 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 import shutil
+
 # --- 1. LOAD CONFIG & VARIABLES ---
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+TRANSCRIPT_API_KEY = os.getenv("TRANSCRIPT_API_KEY")
 
-# --- 3. INITIALIZE CLIENTS ---
+if not TRANSCRIPT_API_KEY:
+    st.error("TRANSCRIPT_API_KEY missing! Railway settings mein jaakar add karein.")
+    st.stop()
+
+# --- 2. INITIALIZE CLIENTS ---
 if not GROQ_API_KEY:
     st.error("GROQ_API_KEY missing! Check Railway Variables.")
     st.stop()
@@ -27,7 +33,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- UI CONFIG ---
 st.set_page_config(page_title="LinkGPT", layout="wide")
 
-# --- SESSION STATE ---
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
 
@@ -45,72 +50,36 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
-# 2nd method for Transcript (Piped API) ------
-def get_piped_transcript(video_id):
-    # Naye active Piped instances
-    instances = [
-        "https://pipedapi.kavin.rocks", 
-        "https://api.piped.projectsegfau.lt",
-        "https://pipedapi.lunar.icu"
-    ]
-    
-    for base_url in instances:
-        try:
-            # Step 1: Video streams data fetch karo
-            api_url = f"{base_url}/streams/{video_id}"
-            response = requests.get(api_url, timeout=10)
-            if response.status_code != 200: continue
-            
-            data = response.json()
-            # Step 2: Subtitles check karo
-            if 'subtitles' in data and len(data['subtitles']) > 0:
-                # Sabse pehla subtitle uthao (aksar English hota hai)
-                sub_url = data['subtitles'][0]['url']
-                sub_res = requests.get(sub_url, timeout=10)
-                
-                # Cleanup logic for VTT/SRT
-                text = sub_res.text
-                text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3} --> \d{2}:\d{2}:\d{2}.\d{3}', '', text) # Timestamps
-                text = re.sub(r'<[^>]*>', '', text) # HTML tags
-                text = " ".join(text.split())
-                return text, None
-        except Exception as e:
-            print(f"Piped instance {base_url} failed: {e}")
-            continue
-    return None, "All bypass servers are currently busy."
+# ----------------- NEW PREMIUM TRANSCRIPT LOGIC -----------------
 
 def get_transcript(video_url):
-    video_id = extract_video_id(video_url)
-    if not video_id: return None, "❌ Invalid YouTube URL"
+    """
+    Directly fetches transcript using the premium API. 
+    No fallback needed as this is highly reliable.
+    """
+    api_url = 'https://transcriptapi.com/api/v2/youtube/transcript'
+    params = {'video_url': video_url, 'format': 'json'}
+    headers = {'Authorization': f'Bearer {TRANSCRIPT_API_KEY}'}
     
-    # --- Priority 1: Official API (With Deep Check) ---
     try:
-        # Saari transcripts ki list mangwao
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        response = requests.get(api_url, params=params, headers=headers, timeout=40)
         
-        # Koshish karo inme se koi mil jaye
-        try:
-            # Manual ya Generated dono mein se jo best ho
-            transcript = transcript_list.find_transcript(['en', 'hi', 'en-US', 'en-GB', 'hi-IN'])
-        except:
-            # Agar upar waali na milti ho, toh jo pehli available hai wahi uthalo (Automatic fallback)
-            transcript = next(iter(transcript_list))
+        if response.status_code == 200:
+            data = response.json()
+            # API returns 'transcript' field as per your provided format
+            full_text = data.get('transcript', '')
+            if full_text:
+                return full_text, None
+            else:
+                return None, "❌ API ne transcript return nahi ki. Video check karein."
+        elif response.status_code == 401:
+            return None, "❌ API Key Invalid hai. Please check karein."
+        else:
+            return None, f"❌ Transcript API Error: Code {response.status_code}"
             
-        data = transcript.fetch()
-        full_text = " ".join([t['text'] for t in data])
-        if len(full_text.strip()) > 10:
-            return full_text, None
     except Exception as e:
-        print(f"Official API Blocked/Failed: {e}")
-
-    # --- Priority 2: Piped API (The Bypass) ---
-    with st.spinner("YouTube direct block kar raha hai... Alternative raste se nikal raha hoon..."):
-        text, error = get_piped_transcript(video_id)
-        if text:
-            return text, None
+        return None, f"❌ Connection Error: {str(e)}"
     
-    return None, "❌ Sorry Bhai! Is video ke captions extract nahi ho paa rahe. Shayad YouTube ne is server ko puri tarah block kar diya hai."
-
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
     system_prompt = """
@@ -231,13 +200,13 @@ raw_input_url = st.text_input("🔗 Paste YouTube Video Link", placeholder="http
 video_url = clean_youtube_url(raw_input_url) if raw_input_url else ""
 
 if video_url:
-    user_query = st.text_area("💬 Ask anything about the video?", height=120)
+    user_query = st.text_area("💬 Ask anything about the video?", height=120, placeholder="Summarize this video...")
     
     if st.button("🚀 Analyze Video Intel", type="primary"):
         if not user_query:
             st.warning("Query likho bhai!")
         else:
-            with st.spinner("🧠 Extracting intelligence..."):
+            with st.spinner("🧠 Premium Intelligence Extracting..."):
                 transcript, error = get_transcript(video_url)
                 
                 if error:
@@ -268,5 +237,4 @@ if video_url:
                             except: pass
 else:
     st.info("👆 YouTube link dalo aur magic dekho.")
-
 
