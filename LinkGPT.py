@@ -10,6 +10,7 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 import shutil
+import requests
 
 # --- 1. LOAD CONFIG & VARIABLES ---
 load_dotenv()
