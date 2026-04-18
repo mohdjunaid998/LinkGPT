@@ -10,7 +10,6 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 import shutil
-import requests
 
 # --- 1. LOAD CONFIG & VARIABLES ---
 load_dotenv()
@@ -54,27 +53,47 @@ def clean_youtube_url(url: str) -> str:
 # ----------------- NEW PREMIUM TRANSCRIPT LOGIC -----------------
 
 def get_transcript(video_url):
-    """
-    Directly fetches transcript using the premium API. 
-    No fallback needed as this is highly reliable.
-    """
+    video_id = extract_video_id(video_url)
+    if not video_id: return None, "❌ Invalid YouTube URL"
+    
+    # --- STEP 1: CHECK SUPABASE CACHE FIRST ---
+    try:
+        cached_data = supabase.table("transcripts_cache") \
+            .select("transcript") \
+            .eq("video_id", video_id) \
+            .execute()
+        
+        if cached_data.data and len(cached_data.data) > 0:
+            st.toast("⚡ Speed Mode: Using cached data!", icon="🚀")
+            return cached_data.data[0]['transcript'], None
+    except Exception as e:
+        print(f"Cache check error: {e}") # Agar cache fail ho toh API par move karenge
+
+    # --- STEP 2: IF NOT IN CACHE, CALL PREMIUM API ---
     api_url = 'https://transcriptapi.com/api/v2/youtube/transcript'
     params = {'video_url': video_url, 'format': 'json'}
     headers = {'Authorization': f'Bearer {TRANSCRIPT_API_KEY}'}
     
     try:
-        response = requests.get(api_url, params=params, headers=headers, timeout=40)
+        response = requests.get(api_url, params=params, headers=headers, timeout=45)
         
         if response.status_code == 200:
-            data = response.json()
-            # API returns 'transcript' field as per your provided format
-            full_text = data.get('transcript', '')
+            full_text = response.json().get('transcript', '')
+            
             if full_text:
+                # --- STEP 3: SAVE TO CACHE FOR NEXT TIME ---
+                try:
+                    supabase.table("transcripts_cache").upsert({
+                        "video_id": video_id,
+                        "transcript": full_text
+                    }).execute()
+                    st.toast("✅ Saved to cache for next time!", icon="💾")
+                except Exception as cache_err:
+                    print(f"Failed to save to cache: {cache_err}")
+                
                 return full_text, None
             else:
-                return None, "❌ API ne transcript return nahi ki. Video check karein."
-        elif response.status_code == 401:
-            return None, "❌ API Key Invalid hai. Please check karein."
+                return None, "❌ API ne transcript return nahi ki."
         else:
             return None, f"❌ Transcript API Error: Code {response.status_code}"
             
@@ -208,6 +227,7 @@ if video_url:
             st.warning("Query likho bhai!")
         else:
             with st.spinner("🧠 Premium Intelligence Extracting..."):
+                # Pehle check cache, then API logic inside this function
                 transcript, error = get_transcript(video_url)
                 
                 if error:
@@ -227,7 +247,7 @@ if video_url:
                                 res_box.markdown(full_response + "▌")
                         res_box.markdown(full_response)
                         
-                        # Database Save Logic
+                        # Database Save History Logic
                         if st.session_state.user_data:
                             try:
                                 supabase.table("video_chats").insert({
@@ -238,4 +258,3 @@ if video_url:
                             except: pass
 else:
     st.info("👆 YouTube link dalo aur magic dekho.")
-
