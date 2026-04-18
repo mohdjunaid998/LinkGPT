@@ -86,6 +86,12 @@ def whisper_transcribe(video_url):
             "quiet": True,
             "no_warnings": True,
             "http_headers": {"Cookie": RAW_COOKIES} if RAW_COOKIES else {},
+            "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "web"],
+            "skip": ["webpage", "configs"]
+        }
+    },
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "external_downloader": "ffmpeg",
             "external_downloader_args": ["-ss", "00:00:00", "-to", "00:08:00", "-threads", "4"],
