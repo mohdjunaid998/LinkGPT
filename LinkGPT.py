@@ -12,7 +12,7 @@ from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 import shutil
 # Step 1: Check karo variable hai ya nahi
-cookies_raw = os.getenv("COOKIES_DATA") 
+cookies_data_from_env = os.getenv("COOKIES_DATA") 
 
 # Step 2: Volume folder path
 volume_path = "/app/cookies/cookies.txt"
