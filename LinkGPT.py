@@ -11,6 +11,13 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 
+# Step 2: Volume folder path
+volume_path = "/app/cookies/cookies.txt"
+
+if cookies_raw and not os.path.exists(volume_path):
+    with open(volume_path, "w") as f:
+        f.write(cookies_raw)
+    print("✅ File permanently moved to Volume!")
 # 1. LOAD CONFIG FIRST
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
