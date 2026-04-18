@@ -63,28 +63,13 @@ def clean_youtube_url(url: str) -> str:
 #--------------------- Mannual & Force Transcribe (Updated) --------------------------------
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
-    if not video_id: return None, "❌ Invalid YouTube URL"
-    
-    formatter = TextFormatter()
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        try:
-            transcript = transcript_list.find_manually_created_transcript(['en', 'hi'])
-        except:
-            try:
-                transcript = transcript_list.find_generated_transcript(['en', 'hi'])
-            except:
-                manual_keys = list(transcript_list._manually_created_transcripts.keys())
-                if manual_keys:
-                    transcript = transcript_list.find_transcript([manual_keys[0]]).translate('en')
-                else:
-                    transcript = next(iter(transcript_list)).translate('en')
-
-        raw_data = transcript.fetch()
-        clean_text = formatter.format_transcript(raw_data).replace('\n', ' ').strip()
-        return clean_text, None
-
+        # Bina kisi download ke seedha transcript uthao
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi'])
+        full_text = " ".join([t['text'] for t in transcript_list])
+        return full_text, None
     except Exception as e:
+        # Sirf tab Whisper par jao jab transcript bilkul na mile
         return whisper_transcribe(video_url)
 
 # --- 100x WHISPER OPTIMIZATION & CACHING ---
