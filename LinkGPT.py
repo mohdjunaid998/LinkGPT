@@ -77,6 +77,18 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
+import requests
+
+def get_external_transcript(video_id):
+    # Example: Using a 3rd party open-source API structure
+    api_url = f"https://api.thirdparty.com/transcript?v={video_id}" 
+    try:
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            return response.json()['text'], None
+    except:
+        return None, "API Failed"
+
 #--------------------- Mannual & Force Transcribe (Updated) --------------------------------
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
