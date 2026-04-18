@@ -10,7 +10,7 @@ from youtube_transcript_api.formatters import TextFormatter
 from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
-
+import shutil
 # Step 1: Check karo variable hai ya nahi
 cookies_raw = os.getenv("COOKIES_DATA") 
 
