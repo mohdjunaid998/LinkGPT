@@ -22,7 +22,7 @@ COOKIES_DATA = os.getenv("COOKIES_DATA")
 
 # --- 2. VOLUME & COOKIE SETUP ---
 # Volume ka path (Railway Mount Path ke hisaab se)
-volume_path = "/app/cookies/cookies.txt" 
+volume_path = "/cookies.txt" 
 
 if COOKIES_DATA:
     try:
