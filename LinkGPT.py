@@ -77,6 +77,29 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
+import requests
+
+def get_piped_transcript(video_id):
+    # Piped ke kisi bhi public instance ka use karo
+    # Example: pipedapi.kavin.rocks, api.piped.victr.me
+    api_url = f"https://pipedapi.kavin.rocks/streams/{video_id}"
+    
+    try:
+        response = requests.get(api_url, timeout=10)
+        data = response.json()
+        
+        # Piped subtitles return karta hai
+        if 'subtitles' in data and len(data['subtitles']) > 0:
+            # Sabse pehle English subtitles dhoondo
+            subtitle_url = data['subtitles'][0]['url']
+            sub_res = requests.get(subtitle_url)
+            # Ye VTT ya SRT format mein hoga, isse clean text mein badal lo
+            return sub_res.text, None
+        else:
+            return None, "Captions not found on Piped"
+    except Exception as e:
+        return None, f"Piped Error: {str(e)}"
+
 #--------------------- Mannual & Force Transcribe (Updated) --------------------------------
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
