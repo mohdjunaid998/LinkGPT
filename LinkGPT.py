@@ -22,7 +22,7 @@ COOKIES_DATA = os.getenv("COOKIES_DATA")
 
 # --- 2. VOLUME & COOKIE SETUP ---
 # Volume ka path (Railway Mount Path ke hisaab se)
-volume_path = "/cookies.txt" 
+volume_path = "/cookies" 
 
 if COOKIES_DATA:
     try:
@@ -92,26 +92,38 @@ def get_transcript(video_url):
 # --- 100x WHISPER OPTIMIZATION & CACHING ---
 def whisper_transcribe(video_url):
     video_id = extract_video_id(video_url)
+    
+    # 1. Cache Check
     if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
-        return st.session_state.last_transcript, None
+        if "last_transcript" in st.session_state:
+            return st.session_state.last_transcript, None
 
     cleanup_temp_audio()
     audio_file = "temp_audio.mp3"
+    
     try:
+        # Path fixed according to your volume mount /cookies
+        volume_cookie_path = "/cookies/cookies.txt"
+
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "http_headers": {"Cookie": COOKIES_DATA} if RAW_COOKIES else {},
+            # Volume path use karo, variables ka jhanjhat khatam
+            "cookiefile": volume_cookie_path if os.path.exists(volume_cookie_path) else None,
             "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "web"],
-            "skip": ["webpage", "configs"]
-        }
-    },
+                "youtube": {
+                    "player_client": ["android", "web"],
+                    "skip": ["webpage", "configs"]
+                }
+            },
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "external_downloader": "ffmpeg",
-            "external_downloader_args": ["-ss", "00:00:00", "-to", "00:08:00", "-threads", "4"],
+            "external_downloader_args": [
+                "-ss", "00:00:00", 
+                "-to", "00:08:00", 
+                "-threads", "4"
+            ],
             "outtmpl": "temp_audio",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -119,9 +131,11 @@ def whisper_transcribe(video_url):
                 "preferredquality": "96",
             }],
         }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
+        # 2. Whisper Transcription call
         with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file, file.read()),
@@ -129,9 +143,12 @@ def whisper_transcribe(video_url):
                 response_format="text",
             )
         
+        # 3. Store in session state
         st.session_state.last_video_id = video_id
         st.session_state.last_transcript = transcription
+        
         return transcription, None
+
     except Exception as e:
         return None, f"❌ Whisper Error: {str(e)}"
     finally:
