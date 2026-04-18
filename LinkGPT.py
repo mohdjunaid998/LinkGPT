@@ -11,71 +11,42 @@ from groq import Groq
 from supabase import create_client, Client # <--- BACKEND LIBRARY
 from dotenv import load_dotenv
 
-# Railway variable se cookies banao
-cookies_b64 = os.getenv("COOKIES_CONTENT")
-if cookies_b64:
-    with open("youtube_cookies.txt", "wb") as f:
-        f.write(base64.b64decode(cookies_b64))
-    print("Cookies file successfully created!")
-else:
-    print("Warning: COOKIES_CONTENT not found in variables!")
-# --- UI CONFIG ---
-
-st.set_page_config(page_title="LinkGPT", layout="wide")
-import os
-# ... baaki imports
-
-# Line 28 ke paas ye karo:
-api_key = os.getenv("GROQ_API_KEY") 
-
-# Agar abhi bhi error aaye, toh check karo ki variable mil raha hai ya nahi:
-if not api_key:
-    st.error("GROQ_API_KEY nahi mil rahi! Variables tab check karo.")
-    st.stop()
-
-client = Groq(api_key=api_key)
-
-# Load .env file
+# 1. LOAD CONFIG FIRST
 load_dotenv()
-
-# Ab keys yahan se uthao
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+COOKIES_CONTENT = os.getenv("COOKIES_CONTENT")
+RAW_COOKIES = os.getenv("COOKIES_DATA") # For HTTP Headers method
+
+# 2. INITIALIZE CLIENTS
+if not GROQ_API_KEY:
+    st.error("GROQ_API_KEY missing! Check Railway Variables.")
+    st.stop()
 
 client = Groq(api_key=GROQ_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 1. SESSION STATE INITIALIZATION ---
+# 3. COOKIES SETUP (Binary File Method)
+if COOKIES_CONTENT:
+    try:
+        with open("youtube_cookies.txt", "wb") as f:
+            f.write(base64.b64decode(COOKIES_CONTENT))
+    except Exception as e:
+        print(f"Cookie creation failed: {e}")
+
+# --- UI CONFIG ---
+st.set_page_config(page_title="LinkGPT", layout="wide")
+
+# --- SESSION STATE ---
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
 
-# ----------------- HISTORY LOGIC -----------------
-def add_to_history(query, transcript):
-    """Recent chats mein prompt add karne ke liye"""
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    
-    new_id = len(st.session_state.chat_history) + 1
-    timestamp = datetime.now().strftime("%I:%M %p")
-    
-    st.session_state.chat_history.append({
-        "id": new_id, 
-        "query": query, 
-        "time": timestamp
-    })
-    
-    # Sidebar clean rakhne ke liye sirf last 7 items rakhte hain
-    if len(st.session_state.chat_history) > 7:
-        st.session_state.chat_history.pop(0)
-
-# ---------------- UTILS ---------------------
+# ----------------- UTILS -----------------
 def cleanup_temp_audio():
-    """Temporary audio file delete karne ke liye"""
     if os.path.exists("temp_audio.mp3"):
         try: os.remove("temp_audio.mp3")
         except: pass
-
 
 def extract_video_id(url: str) -> str:
     patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})",
@@ -95,96 +66,54 @@ def get_transcript(video_url):
     if not video_id: return None, "❌ Invalid YouTube URL"
     
     formatter = TextFormatter()
-    
     try:
-        # 1. Available Transcripts ki List mangwao
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # 2. LOGIC: Manual (EN/HI) -> Generated (EN/HI) -> Manual (Any) -> Translation
         try:
-            # Sabse pehle Manual dhoondo (Best Quality)
             transcript = transcript_list.find_manually_created_transcript(['en', 'hi'])
-            print("✅ Manual Transcript Found!")
         except:
             try:
-                # Agar Manual nahi, toh Auto-generated dhoondo
                 transcript = transcript_list.find_generated_transcript(['en', 'hi'])
-                print("ℹ️ Auto-Generated Found!")
             except:
-                try:
-                    # AGGRESSIVE: Agar dono nahi mile, toh jo bhi pehli MANUAL hai use Translate karo
-                    # Example: Agar video Spanish mein hai par manual hai, toh use English mein badal do
-                    manual_keys = list(transcript_list._manually_created_transcripts.keys())
-                    if manual_keys:
-                        transcript = transcript_list.find_transcript([manual_keys[0]]).translate('en')
-                        print(f"🌍 Foreign Manual ({manual_keys[0]}) Translated to English!")
-                    else:
-                        # Last Option: Jo bhi pehla piece of text hai uthalo aur translate karo
-                        transcript = next(iter(transcript_list)).translate('en')
-                        print("⚠️ Forced Translation from first available source.")
-                except:
-                    raise Exception("No Captions Available")
+                manual_keys = list(transcript_list._manually_created_transcripts.keys())
+                if manual_keys:
+                    transcript = transcript_list.find_transcript([manual_keys[0]]).translate('en')
+                else:
+                    transcript = next(iter(transcript_list)).translate('en')
 
-        # 3. Formatter se Clean Text nikal lo
         raw_data = transcript.fetch()
-        full_text = formatter.format_transcript(raw_data)
-        
-        # AI ke liye single line string (Space optimize karne ke liye)
-        clean_text = full_text.replace('\n', ' ').strip()
-        
-        if not clean_text or len(clean_text) < 50:
-            raise Exception("Transcript is too short or empty")
-            
+        clean_text = formatter.format_transcript(raw_data).replace('\n', ' ').strip()
         return clean_text, None
 
     except Exception as e:
-        # STEP 4: WHISPER FALLBACK (The Last Weapon)
-        # Agar upar ka sab fail hota hai tabhi ye chalega
-        st.toast("Captions are strictly disabled. Initializing Deep AI Scan...", icon="🧠")
         return whisper_transcribe(video_url)
 
 # --- 100x WHISPER OPTIMIZATION & CACHING ---
 def whisper_transcribe(video_url):
     video_id = extract_video_id(video_url)
-    
-    # CHECK: Kya humne ye video abhi-abhi scan ki hai?
     if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
-        if "last_transcript" in st.session_state:
-            print("🚀 Caching Hit! Using previous transcript.")
-            return st.session_state.last_transcript, None
+        return st.session_state.last_transcript, None
 
-    # Agar nayi video hai, toh clean up purani file
     cleanup_temp_audio()
     audio_file = "temp_audio.mp3"
     try:
-       # Cookies fetch karo variable se
-     raw_cookies = os.getenv("COOKIES_DATA")
-     ydl_opts = {
-        "format": "bestaudio/best",
-        "quiet": True,
-        "no_warnings": True,
-        # YE HAI MAGIC LINE: Bina file ke cookies pass karna
-        "http_headers": {
-            "Cookie": raw_cookies
-        },
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "external_downloader": "ffmpeg",
-        "external_downloader_args": [
-            "-ss", "00:00:00", 
-            "-to", "00:08:00",
-            "-threads", "4"
-        ],
-        "outtmpl": "temp_audio",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "96",
-        }],
-    }
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "http_headers": {"Cookie": RAW_COOKIES} if RAW_COOKIES else {},
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "external_downloader": "ffmpeg",
+            "external_downloader_args": ["-ss", "00:00:00", "-to", "00:08:00", "-threads", "4"],
+            "outtmpl": "temp_audio",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "96",
+            }],
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
 
-        # Whisper Large-v3-Turbo (Groq ka sabse tez model)
         with open(audio_file, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file, file.read()),
@@ -192,12 +121,9 @@ def whisper_transcribe(video_url):
                 response_format="text",
             )
         
-        # SAVE TO CACHE: Agli baar ke liye yaad rakho
         st.session_state.last_video_id = video_id
         st.session_state.last_transcript = transcription
-        
         return transcription, None
-
     except Exception as e:
         return None, f"❌ Whisper Error: {str(e)}"
     finally:
