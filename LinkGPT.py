@@ -27,7 +27,7 @@ volume_path = "/cookies.txt"
 if COOKIES_DATA:
     try:
         # Volume folder ensure karo
-        os.makedirs("/app/cookies", exist_ok=True)
+        os.makedirs("/cookies", exist_ok=True)
         
         # Agar file pehle se nahi hai, toh hi write karo (Efficiency)
         if not os.path.exists(volume_path):
