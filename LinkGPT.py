@@ -1,7 +1,6 @@
 import streamlit as st
 import re
 import os
-import yt_dlp
 import base64
 import streamlit.components.v1 as components
 from datetime import datetime
@@ -16,33 +15,6 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-# Cookies ke liye hum ek hi variable use karenge: COOKIES_DATA
-COOKIES_DATA = os.getenv("COOKIES_DATA") 
-
-# --- 2. VOLUME & COOKIE SETUP ---
-# Volume ka path (Railway Mount Path ke hisaab se)
-volume_path = "/cookies.txt" 
-
-if COOKIES_DATA:
-    try:
-        # Volume folder ensure karo
-        os.makedirs("/cookies", exist_ok=True)
-        
-        # Agar file pehle se nahi hai, toh hi write karo (Efficiency)
-        if not os.path.exists(volume_path):
-            with open(volume_path, "w", encoding="utf-8") as f:
-                f.write(COOKIES_DATA)
-            print("✅ Cookies successfully saved to Volume!")
-            
-        # Safety ke liye ek copy local folder mein bhi rakh lo
-        with open("youtube_cookies.txt", "w", encoding="utf-8") as f:
-            f.write(COOKIES_DATA)
-            
-    except Exception as e:
-        print(f"❌ Cookie/Volume Setup Error: {e}")
-else:
-    print("⚠️ Warning: COOKIES_DATA variable not found in Railway!")
 
 # --- 3. INITIALIZE CLIENTS ---
 if not GROQ_API_KEY:
@@ -60,10 +32,6 @@ if "user_data" not in st.session_state:
     st.session_state.user_data = None 
 
 # ----------------- UTILS -----------------
-def cleanup_temp_audio():
-    if os.path.exists("temp_audio.mp3"):
-        try: os.remove("temp_audio.mp3")
-        except: pass
 
 def extract_video_id(url: str) -> str:
     patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})",
@@ -77,105 +45,46 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
-import requests
-
-def get_piped_transcript(video_id):
-    # Piped ke kisi bhi public instance ka use karo
-    # Example: pipedapi.kavin.rocks, api.piped.victr.me
-    api_url = f"https://pipedapi.kavin.rocks/streams/{video_id}"
-    
-    try:
-        response = requests.get(api_url, timeout=10)
-        data = response.json()
-        
-        # Piped subtitles return karta hai
-        if 'subtitles' in data and len(data['subtitles']) > 0:
-            # Sabse pehle English subtitles dhoondo
-            subtitle_url = data['subtitles'][0]['url']
-            sub_res = requests.get(subtitle_url)
-            # Ye VTT ya SRT format mein hoga, isse clean text mein badal lo
-            return sub_res.text, None
-        else:
-            return None, "Captions not found on Piped"
-    except Exception as e:
-        return None, f"Piped Error: {str(e)}"
-
-#--------------------- Mannual & Force Transcribe (Updated) --------------------------------
+# Mannual Transcript-----------
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
+    
+    # --- Priority 1: Official Transcript API ---
     try:
-        # Bina kisi download ke seedha transcript uthao
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi'])
         full_text = " ".join([t['text'] for t in transcript_list])
         return full_text, None
     except Exception as e:
-        # Sirf tab Whisper par jao jab transcript bilkul na mile
-        return whisper_transcribe(video_url)
+        print(f"Official API failed, trying Piped... {e}")
 
-# --- 100x WHISPER OPTIMIZATION & CACHING ---
-def whisper_transcribe(video_url):
-    video_id = extract_video_id(video_url)
+    # --- Priority 2: Piped API (Third Party Bypass) ---
+    text, error = get_piped_transcript(video_id)
+    if text:
+        # Piped ka text clean karna (VTT format hatana)
+        clean_text = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3}.*?\n', '', text) # Time stamps hatane ke liye
+        return clean_text, None
     
-    # 1. Cache Check
-    if "last_video_id" in st.session_state and st.session_state.last_video_id == video_id:
-        if "last_transcript" in st.session_state:
-            return st.session_state.last_transcript, None
+    return None, "❌ Sorry Bhai! Is video ke captions disable hain aur hum audio download nahi kar rahe."
 
-    cleanup_temp_audio()
-    audio_file = "temp_audio.mp3"
+# 2nd method for Transcript------
+def get_piped_transcript(video_id):
+    # Multiple instances use karein taaki agar ek down ho toh dusra chale
+    instances = ["https://pipedapi.kavin.rocks", "https://api.piped.victr.me"]
     
-    try:
-        # Path fixed according to your volume mount /cookies
-        volume_cookie_path = "/cookies/cookies.txt"
-
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "no_warnings": True,
-            # Volume path use karo, variables ka jhanjhat khatam
-            "cookiefile": volume_cookie_path if os.path.exists(volume_cookie_path) else None,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "web"],
-                    "skip": ["webpage", "configs"]
-                }
-            },
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "external_downloader": "ffmpeg",
-            "external_downloader_args": [
-                "-ss", "00:00:00", 
-                "-to", "00:08:00", 
-                "-threads", "4"
-            ],
-            "outtmpl": "temp_audio",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "96",
-            }],
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
-
-        # 2. Whisper Transcription call
-        with open(audio_file, "rb") as file:
-            transcription = client.audio.transcriptions.create(
-                file=(audio_file, file.read()),
-                model="whisper-large-v3-turbo", 
-                response_format="text",
-            )
-        
-        # 3. Store in session state
-        st.session_state.last_video_id = video_id
-        st.session_state.last_transcript = transcription
-        
-        return transcription, None
-
-    except Exception as e:
-        return None, f"❌ Whisper Error: {str(e)}"
-    finally:
-        cleanup_temp_audio()
+    for base_url in instances:
+        api_url = f"{base_url}/streams/{video_id}"
+        try:
+            response = requests.get(api_url, timeout=10)
+            data = response.json()
+            
+            if 'subtitles' in data and len(data['subtitles']) > 0:
+                # English ya Auto-generated dhoondo
+                subtitle_url = data['subtitles'][0]['url']
+                sub_res = requests.get(subtitle_url)
+                return sub_res.text, None
+        except:
+            continue
+    return None, "Piped instances are busy or no captions."
 
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
