@@ -102,7 +102,7 @@ def whisper_transcribe(video_url):
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "http_headers": {"Cookie": RAW_COOKIES} if RAW_COOKIES else {},
+            "http_headers": {"Cookie": COOKIES_DATA} if RAW_COOKIES else {},
             "extractor_args": {
         "youtube": {
             "player_client": ["android", "web"],
