@@ -37,8 +37,14 @@ st.set_page_config(page_title="LinkGPT", layout="wide")
 if "user_data" not in st.session_state:
     st.session_state.user_data = None 
 
-# ----------------- UTILS -----------------
+# --- 2. SESSION STATE INITIALIZATION ---
+# Ye zaroori hai taaki jab user same video pe doosra ques puche toh API call na ho
+if "current_transcript" not in st.session_state:
+    st.session_state.current_transcript = None
+if "last_video_id" not in st.session_state:
+    st.session_state.last_video_id = None
 
+# --- UTILS ---
 def extract_video_id(url: str) -> str:
     patterns = [r"(?:v=|\/)([0-9A-Za-z_-]{11})", r"youtu\.be\/([0-9A-Za-z_-]{11})",
                 r"youtube\.com\/embed\/([0-9A-Za-z_-]{11})", r"youtube\.com\/shorts\/([0-9A-Za-z_-]{11})"]
@@ -51,53 +57,52 @@ def clean_youtube_url(url: str) -> str:
     v_id = extract_video_id(url.strip().split()[0])
     return f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
 
-# ----------------- NEW PREMIUM TRANSCRIPT LOGIC -----------------
-
+# --- 100% WORKING CACHE LOGIC ---
 def get_transcript(video_url):
     video_id = extract_video_id(video_url)
     if not video_id: return None, "❌ Invalid YouTube URL"
     
-    # --- STEP 1: CACHE CHECK (Wahi purana logic) ---
-    try:
-        cached_data = supabase.table("transcripts_cache") \
-            .select("transcript") \
-            .eq("video_id", video_id) \
-            .execute()
-        
-        if cached_data.data and len(cached_data.data) > 0:
-            st.toast("⚡ Using cached data!", icon="🚀")
-            return cached_data.data[0]['transcript'], None
-    except: pass
+    # LAYER 1: RAM Cache (Session State) - Sabse Fast
+    if st.session_state.last_video_id == video_id and st.session_state.current_transcript:
+        st.toast("⚡ Using Session Cache (Instant)", icon="🧠")
+        return st.session_state.current_transcript, None
 
-    # --- STEP 2: API CALL ---
+    # LAYER 2: Database Cache (Supabase)
+    try:
+        res = supabase.table("transcripts_cache").select("transcript").eq("video_id", video_id).execute()
+        if res.data and len(res.data) > 0:
+            transcript_text = res.data[0]['transcript']
+            # Save to session for next immediate query
+            st.session_state.current_transcript = transcript_text
+            st.session_state.last_video_id = video_id
+            
+            st.success("💾 Retrieved from Supabase (API Credits Saved!)")
+            return transcript_text, None
+    except Exception as e:
+        print(f"DB Error: {e}")
+
+    # LAYER 3: Premium API Call (Final Resort)
     api_url = 'https://transcriptapi.com/api/v2/youtube/transcript'
-    
-    # Direct original URL bhej kar dekho, cleaning ke bina
     params = {'video_url': video_url, 'format': 'json'}
     headers = {'Authorization': f'Bearer {TRANSCRIPT_API_KEY}'}
     
     try:
         response = requests.get(api_url, params=params, headers=headers, timeout=45)
-        
         if response.status_code == 200:
             full_text = response.json().get('transcript', '')
             if full_text:
-                # Cache save logic...
+                # Save to Database
+                supabase.table("transcripts_cache").upsert({"video_id": video_id, "transcript": full_text}).execute()
+                # Save to Session
+                st.session_state.current_transcript = full_text
+                st.session_state.last_video_id = video_id
+                
+                st.info("🆕 New Transcript Analyzed & Saved.")
                 return full_text, None
-        
-        # AGAR 404 AAYE TOH EK BAAR ALTERNATIVE URL TRY KARO
-        elif response.status_code == 404:
-            alt_url = f"https://www.youtube.com/watch?v={video_id}"
-            params['video_url'] = alt_url
-            response = requests.get(api_url, params=params, headers=headers, timeout=30)
-            if response.status_code == 200:
-                return response.json().get('transcript', ''), None
-            return None, "❌ API ko ye video nahi mili. Kya video public hai?"
-
-        return None, f"❌ API Error: Code {response.status_code}"
-            
+        return None, f"❌ API Error: {response.status_code}"
     except Exception as e:
-        return None, f"❌ Connection Error: {str(e)}"
+        return None, f"❌ Connection: {str(e)}"
+    
 # ----------------- AI LOGIC ------------------
 def get_ai_response(transcript, user_query):
     system_prompt = """
@@ -203,7 +208,6 @@ Redundant or filler content
 # ----------------- MAIN UI (CLEAN VERSION) -----------------
 
 
-
 st.markdown("""
     <h1 class="main-title">
         <span class="blue-text">LinkGPT</span> 
@@ -214,18 +218,20 @@ st.markdown("""
 st.write("Extract insights from any YouTube or Insta video in seconds.")
 st.markdown("---")
 
+# 1. URL Input Section
 raw_input_url = st.text_input("🔗 Paste YouTube Video Link", placeholder="https://youtube.com/watch?v=...")
 video_url = clean_youtube_url(raw_input_url) if raw_input_url else ""
 
 if video_url:
-    user_query = st.text_area("💬 Ask anything about the video?", height=120, placeholder="Summarize this video...")
+    # 2. Query Input Section (Only shows if URL is present)
+    user_query = st.text_area("💬 Ask anything about the video?", height=120, placeholder="E.g., Summarize the main points, or ask about a specific timestamp...")
     
     if st.button("🚀 Analyze Video Intel", type="primary"):
         if not user_query:
-            st.warning("Query likho bhai!")
+            st.warning("Pehle query likho bhai!")
         else:
-            with st.spinner("🧠 Premium Intelligence Extracting..."):
-                # Pehle check cache, then API logic inside this function
+            with st.spinner("🧠 Processing Intelligence..."):
+                # Fetch Transcript (using our 3-layer cache logic)
                 transcript, error = get_transcript(video_url)
                 
                 if error:
@@ -234,6 +240,8 @@ if video_url:
                     st.markdown("---")
                     res_box = st.empty()
                     full_response = ""
+                    
+                    # Call AI response
                     response_stream = get_ai_response(transcript, user_query)
                     
                     if isinstance(response_stream, str):
@@ -245,14 +253,16 @@ if video_url:
                                 res_box.markdown(full_response + "▌")
                         res_box.markdown(full_response)
                         
-                        # Database Save History Logic
-                        if st.session_state.user_data:
+                        # 3. Save Chat History in backend (If user is logged in)
+                        if st.session_state.get('user_data'):
                             try:
                                 supabase.table("video_chats").insert({
                                     "user_email": st.session_state.user_data['email'],
                                     "query": user_query,
                                     "video_url": video_url
                                 }).execute()
-                            except: pass
+                            except Exception as e:
+                                print(f"History save error: {e}")
 else:
+    # 4. Fallback UI: Jab tak link nahi dala gaya
     st.info("👆 YouTube link dalo aur magic dekho.")
